@@ -1,12 +1,9 @@
 # ╔══════════════════════════════════════════════════════════════════════════════╗
 # ║                         COMPLETE EXAMPLE                                      ║
 # ║                                                                                ║
-# ║  Demonstrates all features of the Scaleway Object Storage module:             ║
-# ║  - Multiple buckets with different configurations                             ║
-# ║  - Lifecycle rules for cost optimization                                      ║
-# ║  - Static website hosting with CORS                                           ║
-# ║  - Bucket policies for access control                                         ║
-# ║  - Object uploads                                                             ║
+# ║  Demonstrates all features of the Scaleway Storage module:                    ║
+# ║  - Object Storage: Buckets, versioning, lifecycle, website, CORS              ║
+# ║  - Block Storage: Volumes with different IOPS tiers, snapshots                ║
 # ╚══════════════════════════════════════════════════════════════════════════════╝
 
 # ==============================================================================
@@ -19,62 +16,36 @@ module "storage" {
   # Required: Scaleway organization and project
   organization_id = var.organization_id
   project_name    = var.project_name
+  region          = "fr-par"
 
-  # Region and global tags
-  region = "fr-par"
+  # Global tags applied to all resources
   tags = {
     environment = var.environment
     managed-by  = "terraform"
+    example     = "complete"
   }
 
-  # ---------------------------------------------------------------------------
-  # Bucket Configurations
-  # ---------------------------------------------------------------------------
+  # ============================================================================
+  # Object Storage Buckets
+  # ============================================================================
 
   buckets = {
-    # -------------------------------------------------------------------------
-    # Private Data Buckets (count: 3)
-    # -------------------------------------------------------------------------
-    # For application data with versioning and lifecycle management
+    # ---------------------------------------------------------------------------
+    # Application Data Bucket
+    # Private bucket with versioning for data protection
+    # ---------------------------------------------------------------------------
     data = {
       name          = "${var.prefix}-data-${var.environment}"
-      count         = 3 # Creates: data-1, data-2, data-3
       acl           = "private"
       versioning    = true
       force_destroy = var.environment != "production"
 
       lifecycle_rules = [
         {
-          id      = "archive-logs"
+          id      = "cleanup-multipart"
           enabled = true
-          prefix  = "logs/"
-
-          # Move logs to GLACIER after 30 days
-          transition = [
-            {
-              days          = 30
-              storage_class = "GLACIER"
-            }
-          ]
-
-          # Delete logs after 1 year
-          expiration = {
-            days = 365
-          }
-
-          # Clean up incomplete uploads
           abort_incomplete_multipart_upload = {
             days_after_initiation = 7
-          }
-        },
-        {
-          id      = "cleanup-temp"
-          enabled = true
-          prefix  = "temp/"
-
-          # Delete temporary files after 7 days
-          expiration = {
-            days = 7
           }
         }
       ]
@@ -82,37 +53,65 @@ module "storage" {
       tags = { type = "data" }
     }
 
-    # -------------------------------------------------------------------------
-    # Public Assets Bucket (count: 1)
-    # -------------------------------------------------------------------------
-    # For static assets served via CDN or direct access
+    # ---------------------------------------------------------------------------
+    # Static Assets Bucket
+    # Public bucket with CORS for web applications
+    # ---------------------------------------------------------------------------
     assets = {
       name          = "${var.prefix}-assets-${var.environment}"
-      count         = 1 # Creates: assets-1
       acl           = "public-read"
       force_destroy = var.environment != "production"
 
-      # Enable CORS for web applications
       cors_rules = [
         {
           allowed_methods = ["GET", "HEAD"]
           allowed_origins = ["*"]
           allowed_headers = ["*"]
-          expose_headers  = ["ETag", "Content-Length"]
-          max_age_seconds = 86400 # 24 hours
+          max_age_seconds = 3600
         }
       ]
 
-      tags = { type = "assets", public = "true" }
+      tags = { type = "assets" }
     }
 
-    # -------------------------------------------------------------------------
-    # Static Website Buckets (count: 4)
-    # -------------------------------------------------------------------------
-    # For hosting static websites
+    # ---------------------------------------------------------------------------
+    # Logs Bucket with Lifecycle
+    # Archive to GLACIER after 30 days, delete after 365 days
+    # ---------------------------------------------------------------------------
+    logs = {
+      name          = "${var.prefix}-logs-${var.environment}"
+      acl           = "private"
+      versioning    = true
+      force_destroy = var.environment != "production"
+
+      lifecycle_rules = [
+        {
+          id      = "archive-and-expire"
+          enabled = true
+          prefix  = "app/"
+
+          transition = [
+            {
+              days          = 30
+              storage_class = "GLACIER"
+            }
+          ]
+
+          expiration = {
+            days = 365
+          }
+        }
+      ]
+
+      tags = { type = "logs", retention = "1year" }
+    }
+
+    # ---------------------------------------------------------------------------
+    # Static Website Bucket
+    # Hosts static website with index and error pages
+    # ---------------------------------------------------------------------------
     website = {
       name          = "${var.prefix}-website-${var.environment}"
-      count         = 4 # Creates: website-1, website-2, website-3, website-4
       acl           = "public-read"
       force_destroy = var.environment != "production"
 
@@ -126,151 +125,155 @@ module "storage" {
           allowed_methods = ["GET", "HEAD"]
           allowed_origins = ["*"]
           allowed_headers = ["*"]
-          max_age_seconds = 3600
+          max_age_seconds = 86400
         }
       ]
 
-      tags = { type = "website", public = "true" }
+      tags = { type = "website" }
     }
-
-    # -------------------------------------------------------------------------
-    # Backup Bucket (count: 1)
-    # -------------------------------------------------------------------------
-    # For backups with versioning (never force_destroy)
-    backup = {
-      name          = "${var.prefix}-backup-v2-${var.environment}"
-      count         = 1 # Creates: backup-1
-      acl           = "private"
-      versioning    = true
-      force_destroy = false # Never allow force destroy for backups
-
-      lifecycle_rules = [
-        {
-          id      = "cleanup-multipart"
-          enabled = true
-
-          # Clean up failed multipart uploads quickly
-          abort_incomplete_multipart_upload = {
-            days_after_initiation = 1
-          }
-        }
-      ]
-
-      tags = { type = "backup", critical = "true" }
-    }
-
-    # -------------------------------------------------------------------------
-    # Compliance Bucket (Optional - Uncomment if needed)
-    # -------------------------------------------------------------------------
-    # For regulatory compliance with WORM (Write Once Read Many)
-    # WARNING: Object lock cannot be disabled once enabled!
-    #
-    # compliance = {
-    #   name                = "${var.prefix}-compliance-${var.environment}"
-    #   acl                 = "private"
-    #   versioning          = true    # Required for object lock
-    #   object_lock_enabled = true    # Enable WORM
-    #   force_destroy       = false
-    #   tags                = { type = "compliance", retention = "enabled" }
-    # }
   }
 
-  # ---------------------------------------------------------------------------
-  # Bucket Policies (Optional)
-  # ---------------------------------------------------------------------------
-  # Note: For simple public access, use ACL (acl = "public-read") instead.
-  # Bucket policies with Version 2023-04-17 require explicit permissions for
-  # ALL operations - a policy with only s3:GetObject will block Terraform from
-  # managing the bucket. Only use policies when you need fine-grained control
-  # and can specify your user_id/application_id as Principal.
-  #
-  # Example policy structure (requires your SCW user_id or application_id):
-  # bucket_policies = {
-  #   assets_policy = {
-  #     bucket_key = "assets"
-  #     policy = jsonencode({
-  #       Version = "2023-04-17"
-  #       Statement = [
-  #         {
-  #           Sid       = "TerraformAccess"
-  #           Effect    = "Allow"
-  #           Principal = { SCW = "user_id:<YOUR_USER_ID>" }
-  #           Action    = "s3:*"
-  #           Resource  = ["<BUCKET_NAME>", "<BUCKET_NAME>/*"]
-  #         },
-  #         {
-  #           Sid       = "PublicRead"
-  #           Effect    = "Allow"
-  #           Principal = "*"
-  #           Action    = "s3:GetObject"
-  #           Resource  = "<BUCKET_NAME>/*"
-  #         }
-  #       ]
-  #     })
-  #   }
-  # }
-  bucket_policies = {}
-
-  # ---------------------------------------------------------------------------
-  # Object Lock Configuration (Uncomment if using compliance bucket)
-  # ---------------------------------------------------------------------------
-  #
-  # bucket_lock_configurations = {
-  #   compliance_lock = {
-  #     bucket_key = "compliance"
-  #     rule = {
-  #       default_retention = {
-  #         mode = "COMPLIANCE"  # Cannot be overridden
-  #         years = 7           # 7-year retention
-  #       }
-  #     }
-  #   }
-  # }
-
-  # ---------------------------------------------------------------------------
-  # Initial Objects
-  # ---------------------------------------------------------------------------
+  # ============================================================================
+  # Object Uploads
+  # ============================================================================
 
   objects = {
-    # robots.txt for website-1 (first website bucket)
-    robots_txt = {
-      bucket_key   = "website-1" # Reference expanded bucket key
-      key          = "robots.txt"
-      content      = "User-agent: *\nAllow: /"
-      content_type = "text/plain"
-      visibility   = "public-read"
-    }
-
-    # Health check endpoint
-    health_json = {
-      bucket_key   = "website-1" # Reference expanded bucket key
-      key          = "health.json"
-      content      = jsonencode({ status = "ok", version = "1.0.0" })
-      content_type = "application/json"
-      visibility   = "public-read"
-    }
-
-    # Placeholder index page
-    index_html = {
-      bucket_key   = "website-1" # Reference expanded bucket key
+    # Upload index.html to website bucket
+    website_index = {
+      bucket_key   = "website-1" # Expanded key (count defaults to 1)
       key          = "index.html"
       content      = <<-HTML
         <!DOCTYPE html>
         <html>
-        <head>
-          <title>Welcome</title>
-          <meta charset="utf-8">
-        </head>
-        <body>
-          <h1>Welcome to ${var.prefix}</h1>
-          <p>Environment: ${var.environment}</p>
-        </body>
+        <head><title>Welcome</title></head>
+        <body><h1>Hello from Scaleway!</h1></body>
         </html>
       HTML
       content_type = "text/html"
       visibility   = "public-read"
     }
+
+    # Upload 404.html to website bucket
+    website_404 = {
+      bucket_key   = "website-1"
+      key          = "404.html"
+      content      = <<-HTML
+        <!DOCTYPE html>
+        <html>
+        <head><title>Not Found</title></head>
+        <body><h1>404 - Page Not Found</h1></body>
+        </html>
+      HTML
+      content_type = "text/html"
+      visibility   = "public-read"
+    }
+
+    # Upload robots.txt
+    robots = {
+      bucket_key   = "website-1"
+      key          = "robots.txt"
+      content      = "User-agent: *\nAllow: /"
+      content_type = "text/plain"
+      visibility   = "public-read"
+    }
   }
+
+  # ============================================================================
+  # Block Storage Volumes
+  # ============================================================================
+
+  block_volumes = {
+    # ---------------------------------------------------------------------------
+    # Database Volume - High Performance
+    # 15,000 IOPS for database workloads
+    # Creates: database-1
+    # ---------------------------------------------------------------------------
+    database = {
+      name            = "${var.prefix}-db-${var.environment}"
+      size_in_gb      = 100
+      iops            = 15000 # High performance tier
+      zone            = "fr-par-1"
+      prevent_destroy = var.environment == "production" # Document intent
+      tags            = ["database", var.environment]
+    }
+
+    # ---------------------------------------------------------------------------
+    # Application Volumes - Standard Performance (count = 2)
+    # 5,000 IOPS for general application data
+    # Creates: app-1, app-2
+    # ---------------------------------------------------------------------------
+    app = {
+      name       = "${var.prefix}-app-${var.environment}"
+      count      = 2 # Create 2 volumes: app-1, app-2
+      size_in_gb = 50
+      iops       = 5000 # Standard tier
+      zone       = "fr-par-1"
+      tags       = ["application", var.environment]
+    }
+
+    # ---------------------------------------------------------------------------
+    # Logs Volume - Standard Performance
+    # 5,000 IOPS for log storage
+    # Creates: logs-1
+    # ---------------------------------------------------------------------------
+    logs = {
+      name       = "${var.prefix}-logs-vol-${var.environment}"
+      size_in_gb = 20
+      iops       = 5000
+      zone       = "fr-par-1"
+      tags       = ["logs", var.environment]
+    }
+  }
+
+  # ============================================================================
+  # Block Storage Snapshots
+  # ============================================================================
+
+  block_snapshots = {
+    # Create snapshot of database volume AND export to Object Storage
+    # Note: volume_key must use expanded key format (database-1, not database)
+    database_backup = {
+      name       = "${var.prefix}-db-backup-${var.environment}"
+      volume_key = "database-1" # Expanded key (count defaults to 1)
+      tags       = ["backup", "database", var.environment]
+
+      # Export to Object Storage for offsite backup
+      export = {
+        bucket = "${var.prefix}-data-${var.environment}" # Use data bucket
+        key    = "snapshots/database-backup.qcow2"
+      }
+    }
+
+    # Create snapshots for app volumes with export (count = 2)
+    # Creates: app_backup-1, app_backup-2
+    # Exports: snapshots/app-backup-1.qcow2, snapshots/app-backup-2.qcow2
+    app_backup = {
+      count      = 2
+      volume_key = "app-1"
+      tags       = ["backup", "app", var.environment]
+
+      # Export each snapshot (key gets -1, -2 suffix automatically)
+      export = {
+        bucket = "${var.prefix}-data-${var.environment}"
+        key    = "snapshots/app-backup.qcow2"
+      }
+    }
+  }
+
+  # Example: Import snapshot from Object Storage (uncomment to use)
+  # block_snapshots = {
+  #   restored_db = {
+  #     name = "restored-database"
+  #     zone = "fr-par-1"
+  #     tags = ["restored", "database"]
+  #
+  #     # Import from QCOW2 file in Object Storage
+  #     import = {
+  #       bucket = "my-backup-bucket"
+  #       key    = "snapshots/database-backup.qcow2"
+  #     }
+  #   }
+  # }
 }
 
 # ==============================================================================
@@ -280,33 +283,21 @@ module "storage" {
 variable "organization_id" {
   description = "Scaleway Organization ID (UUID format)"
   type        = string
-  default     = "f3d8393e-008a-4fb2-a4ff-81b6fe5c01b0"
 }
 
 variable "project_name" {
   description = "Scaleway Project name where resources will be created"
   type        = string
-  default     = "default"
 }
 
 variable "prefix" {
-  description = "Prefix for bucket names (must be globally unique across Scaleway)"
+  description = "Prefix for resource names (must be globally unique for buckets)"
   type        = string
-  default     = "test-storage"
-
-  validation {
-    condition     = can(regex("^[a-z][a-z0-9-]{2,20}$", var.prefix))
-    error_message = "Prefix must be 3-21 lowercase alphanumeric characters with hyphens."
-  }
+  default     = "example"
 }
 
 variable "environment" {
-  description = "Environment name (development, integration, staging, production, dev, int, prod)"
+  description = "Environment name (e.g., dev, staging, production)"
   type        = string
   default     = "dev"
-
-  validation {
-    condition     = contains(["development", "integration", "staging", "production", "dev", "int", "prod"], var.environment)
-    error_message = "Environment must be: development, staging, or production."
-  }
 }

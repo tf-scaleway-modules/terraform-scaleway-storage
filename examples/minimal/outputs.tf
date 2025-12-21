@@ -9,7 +9,7 @@ output "bucket_name" {
 
 output "bucket_endpoint" {
   description = "S3 endpoint for the bucket"
-  value       = module.storage.bucket_endpoints["data"]
+  value       = module.storage.bucket_endpoints["data-1"] # Expanded key (count=1)
 }
 
 output "s3_endpoint" {
@@ -19,5 +19,5 @@ output "s3_endpoint" {
 
 output "bucket_arn" {
   description = "ARN-style identifier for use in policies"
-  value       = module.storage.bucket_arns["data"]
+  value       = module.storage.bucket_arns["data-1"] # Expanded key (count=1)
 }

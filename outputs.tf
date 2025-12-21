@@ -226,3 +226,124 @@ output "environment_variables" {
     AWS_REGION          = var.region
   }
 }
+
+# ==============================================================================
+# Block Storage Outputs
+# ------------------------------------------------------------------------------
+# Information about Block Storage volumes and snapshots.
+# Keys use expanded format (e.g., "database-1", "database-2").
+# ==============================================================================
+
+output "block_volumes" {
+  description = <<-EOT
+    Map of all created Block Storage volumes with their details.
+
+    Keys use expanded format (e.g., "database-1", "database-2").
+
+    Each volume includes:
+    - id: Volume ID (zoned format: zone/uuid)
+    - name: Volume name
+    - size_in_gb: Volume size
+    - iops: IOPS performance tier
+    - zone: Availability Zone
+    - volume_key: Original volume key (before expansion)
+    - index: Instance index (1, 2, 3, ...)
+  EOT
+  value = {
+    for k, v in scaleway_block_volume.this : k => {
+      id         = v.id
+      name       = v.name
+      size_in_gb = v.size_in_gb
+      iops       = v.iops
+      zone       = v.zone
+      volume_key = local.expanded_block_volumes[k].volume_key
+      index      = local.expanded_block_volumes[k].index
+    }
+  }
+}
+
+output "block_volume_ids" {
+  description = "Map of expanded volume keys to their Scaleway resource IDs."
+  value       = { for k, v in scaleway_block_volume.this : k => v.id }
+}
+
+output "block_volume_names" {
+  description = "List of all block volume names created by this module."
+  value       = [for v in scaleway_block_volume.this : v.name]
+}
+
+output "block_snapshots" {
+  description = <<-EOT
+    Map of all created Block Storage snapshots with their details.
+
+    Keys use expanded format (e.g., "backup-1", "backup-2").
+    Includes both volume-based and imported snapshots.
+
+    Each snapshot includes:
+    - id: Snapshot ID
+    - name: Snapshot name
+    - volume_id: Source volume ID (null for imported snapshots)
+    - zone: Availability Zone
+    - snapshot_key: Original snapshot key (before expansion)
+    - index: Instance index (1, 2, 3, ...)
+    - source: "volume" or "import"
+    - export: Export details if configured (bucket, key)
+  EOT
+  value = merge(
+    # Snapshots from volumes
+    {
+      for k, v in scaleway_block_snapshot.this : k => {
+        id           = v.id
+        name         = v.name
+        volume_id    = v.volume_id
+        zone         = v.zone
+        snapshot_key = local.expanded_block_snapshots[k].snapshot_key
+        index        = local.expanded_block_snapshots[k].index
+        source       = "volume"
+        export       = local.expanded_block_snapshots[k].export
+      }
+    },
+    # Imported snapshots
+    {
+      for k, v in scaleway_block_snapshot.imported : k => {
+        id           = v.id
+        name         = v.name
+        volume_id    = null
+        zone         = v.zone
+        snapshot_key = local.expanded_block_snapshots[k].snapshot_key
+        index        = local.expanded_block_snapshots[k].index
+        source       = "import"
+        export       = local.expanded_block_snapshots[k].export
+      }
+    }
+  )
+}
+
+output "block_snapshot_ids" {
+  description = "Map of expanded snapshot keys to their Scaleway resource IDs."
+  value = merge(
+    { for k, v in scaleway_block_snapshot.this : k => v.id },
+    { for k, v in scaleway_block_snapshot.imported : k => v.id }
+  )
+}
+
+output "block_snapshot_exports" {
+  description = <<-EOT
+    Map of snapshots configured for export to Object Storage.
+
+    Each entry includes:
+    - snapshot_id: The snapshot ID
+    - bucket: Destination bucket name
+    - key: Object key/path for the QCOW2 file
+    - url: Full S3 URL to the exported file
+  EOT
+  value = {
+    for k, v in local.expanded_block_snapshots : k => {
+      snapshot_id = try(scaleway_block_snapshot.this[k].id, scaleway_block_snapshot.imported[k].id)
+      bucket      = v.export.bucket
+      key         = v.export.key
+      url         = "https://${v.export.bucket}.s3.${var.region}.scw.cloud/${v.export.key}"
+    }
+    if v.export != null
+  }
+}

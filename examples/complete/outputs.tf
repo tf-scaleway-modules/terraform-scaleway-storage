@@ -3,100 +3,7 @@
 # ╚══════════════════════════════════════════════════════════════════════════════╝
 
 # ==============================================================================
-# Project Information
-# ==============================================================================
-
-output "project_id" {
-  description = "Scaleway Project ID where resources are created"
-  value       = module.storage.project_id
-}
-
-output "region" {
-  description = "Deployment region"
-  value       = module.storage.region
-}
-
-# ==============================================================================
-# Bucket Information
-# ==============================================================================
-
-output "buckets" {
-  description = "Complete details for all created buckets"
-  value       = module.storage.buckets
-}
-
-output "bucket_endpoints" {
-  description = "S3 endpoints for all buckets"
-  value       = module.storage.bucket_endpoints
-}
-
-output "bucket_arns" {
-  description = "ARN-style identifiers for bucket policies"
-  value       = module.storage.bucket_arns
-}
-
-# ==============================================================================
-# Individual Bucket Details (using expanded keys)
-# ==============================================================================
-
-output "data_buckets" {
-  description = "Data buckets connection details (data-1, data-2, data-3)"
-  value = {
-    for k, v in module.storage.buckets : k => {
-      name     = v.name
-      endpoint = v.endpoint
-    } if startswith(k, "data-")
-  }
-}
-
-output "assets_bucket" {
-  description = "Assets bucket connection details"
-  value = {
-    name     = module.storage.buckets["assets-1"].name
-    endpoint = module.storage.bucket_endpoints["assets-1"]
-    arn      = module.storage.bucket_arns["assets-1"]
-  }
-}
-
-output "backup_bucket" {
-  description = "Backup bucket connection details"
-  value = {
-    name     = module.storage.buckets["backup-1"].name
-    endpoint = module.storage.bucket_endpoints["backup-1"]
-    arn      = module.storage.bucket_arns["backup-1"]
-  }
-}
-
-# ==============================================================================
-# Website Information
-# ==============================================================================
-
-output "website_urls" {
-  description = "Static website URLs (website-1 through website-4)"
-  value       = module.storage.website_urls
-}
-
-output "website_details" {
-  description = "Complete website configuration for first website bucket"
-  value       = module.storage.website_endpoints["website-1"]
-}
-
-# ==============================================================================
-# Object Information
-# ==============================================================================
-
-output "uploaded_objects" {
-  description = "Details of all uploaded objects"
-  value       = module.storage.objects
-}
-
-output "object_urls" {
-  description = "Direct URLs to uploaded objects"
-  value       = module.storage.object_urls
-}
-
-# ==============================================================================
-# S3 Client Configuration
+# Object Storage Outputs
 # ==============================================================================
 
 output "s3_endpoint" {
@@ -104,39 +11,83 @@ output "s3_endpoint" {
   value       = module.storage.s3_endpoint
 }
 
+output "bucket_names" {
+  description = "All bucket names created"
+  value       = module.storage.bucket_names
+}
+
+output "bucket_endpoints" {
+  description = "S3 endpoints for each bucket"
+  value       = module.storage.bucket_endpoints
+}
+
+output "data_bucket" {
+  description = "Data bucket details"
+  value       = module.storage.buckets["data-1"]
+}
+
+output "assets_bucket" {
+  description = "Assets bucket details"
+  value       = module.storage.buckets["assets-1"]
+}
+
+output "website_url" {
+  description = "Static website URL"
+  value       = module.storage.website_urls["website-1"]
+}
+
+output "object_urls" {
+  description = "URLs of uploaded objects"
+  value       = module.storage.object_urls
+}
+
+# ==============================================================================
+# Block Storage Outputs
+# ==============================================================================
+
+output "block_volumes" {
+  description = "All block storage volumes (uses expanded keys: database-1, app-1, app-2, logs-1)"
+  value       = module.storage.block_volumes
+}
+
+output "block_volume_names" {
+  description = "List of all block volume names"
+  value       = module.storage.block_volume_names
+}
+
+output "database_volume_id" {
+  description = "Database volume ID (for attaching to instances)"
+  value       = module.storage.block_volume_ids["database-1"] # Expanded key
+}
+
+output "app_volume_ids" {
+  description = "Application volume IDs (count=2 creates app-1 and app-2)"
+  value = {
+    app_1 = module.storage.block_volume_ids["app-1"]
+    app_2 = module.storage.block_volume_ids["app-2"]
+  }
+}
+
+output "block_snapshots" {
+  description = "All block storage snapshots (uses expanded keys)"
+  value       = module.storage.block_snapshots
+}
+
+output "block_snapshot_exports" {
+  description = "Snapshots exported to Object Storage (QCOW2 files)"
+  value       = module.storage.block_snapshot_exports
+}
+
+# ==============================================================================
+# AWS CLI Configuration
+# ==============================================================================
+
 output "aws_cli_commands" {
-  description = "AWS CLI configuration commands"
+  description = "Commands to configure AWS CLI for Scaleway"
   value       = module.storage.aws_cli_config.commands
 }
 
 output "environment_variables" {
-  description = "Environment variables for S3 tools"
+  description = "Environment variables for S3-compatible tools"
   value       = module.storage.environment_variables
-}
-
-# ==============================================================================
-# Quick Reference
-# ==============================================================================
-
-output "quick_reference" {
-  description = "Quick reference for common operations"
-  value       = <<-EOT
-
-    ╔══════════════════════════════════════════════════════════════════╗
-    ║                    SCALEWAY STORAGE QUICK REFERENCE              ║
-    ╠══════════════════════════════════════════════════════════════════╣
-    ║                                                                  ║
-    ║  S3 Endpoint: ${module.storage.s3_endpoint}
-    ║                                                                  ║
-    ║  AWS CLI Setup:                                                  ║
-    ║  $ aws configure set s3.endpoint_url ${module.storage.s3_endpoint}
-    ║  $ aws configure set default.region ${module.storage.region}
-    ║                                                                  ║
-    ║  Website URLs: See website_urls output                           ║
-    ║                                                                  ║
-    ║  Buckets: See bucket_endpoints output for all ${length(module.storage.buckets)} buckets
-    ║                                                                  ║
-    ╚══════════════════════════════════════════════════════════════════╝
-
-  EOT
 }

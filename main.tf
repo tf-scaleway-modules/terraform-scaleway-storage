@@ -245,3 +245,126 @@ resource "scaleway_object" "this" {
 
   depends_on = [scaleway_object_bucket.this]
 }
+
+# ╔══════════════════════════════════════════════════════════════════════════════╗
+# ║                            BLOCK STORAGE RESOURCES                           ║
+# ╚══════════════════════════════════════════════════════════════════════════════╝
+
+# ==============================================================================
+# Block Storage Volumes
+# ------------------------------------------------------------------------------
+# Network-attached SSD storage volumes for Scaleway Instances.
+# Features:
+# - Persistent storage independent of Instance lifecycle
+# - Up to 15,000 IOPS for high-performance workloads
+# - Can be attached/detached and moved between Instances
+# - Supports snapshots for backup and recovery
+# - Count parameter for creating multiple identical volumes
+#
+# IOPS Tiers:
+# - 5000 IOPS: Standard performance tier
+# - 15000 IOPS: High performance tier (requires compatible Instance)
+#
+# EXPANDED KEYS:
+# When count > 1, volumes are created with expanded keys:
+# - database (count=3) → database-1, database-2, database-3
+#
+# NOTE: prevent_destroy in lifecycle block cannot be dynamically set in
+# Terraform. The prevent_destroy variable is for documentation purposes.
+# For production, manually set prevent_destroy = true in this block.
+# ==============================================================================
+
+resource "scaleway_block_volume" "this" {
+  for_each = local.expanded_block_volumes
+
+  name        = each.value.name
+  iops        = each.value.iops
+  size_in_gb  = each.value.size_in_gb
+  zone        = each.value.zone
+  project_id  = data.scaleway_account_project.project.id
+  snapshot_id = each.value.snapshot_id
+  tags        = each.value.tags
+
+  lifecycle {
+    # NOTE: Terraform requires this to be a literal value, not a variable.
+    # Set to true manually for production volumes to prevent accidental deletion.
+    # The prevent_destroy variable in block_volumes serves as documentation of intent.
+    prevent_destroy = false
+  }
+}
+
+# ==============================================================================
+# Block Storage Snapshots
+# ------------------------------------------------------------------------------
+# Point-in-time snapshots of Block Storage volumes.
+# Use cases:
+# - Regular backups for disaster recovery
+# - Creating new volumes from known good state
+# - Testing and development environments
+# - Migration between zones (via snapshot restore)
+# - Export to Object Storage for offsite backup (QCOW2 format)
+# - Import from Object Storage to restore from archived snapshots
+#
+# EXPANDED KEYS:
+# When count > 1, snapshots are created with expanded keys:
+# - backup (count=3) → backup-1, backup-2, backup-3
+#
+# TWO MODES:
+# 1. From volume: volume_key references an expanded volume key (e.g., "database-1")
+# 2. From import: import block specifies QCOW2 file in Object Storage
+# ==============================================================================
+
+# Snapshots created from volumes (volume_key provided)
+resource "scaleway_block_snapshot" "this" {
+  for_each = {
+    for k, v in local.expanded_block_snapshots : k => v
+    if v.volume_key != null
+  }
+
+  name       = each.value.name
+  volume_id  = scaleway_block_volume.this[each.value.volume_key].id
+  zone       = each.value.zone != null ? each.value.zone : scaleway_block_volume.this[each.value.volume_key].zone
+  project_id = data.scaleway_account_project.project.id
+  tags       = each.value.tags
+
+  # Export snapshot to Object Storage as QCOW2 file
+  dynamic "export" {
+    for_each = each.value.export != null ? [each.value.export] : []
+    content {
+      bucket = export.value.bucket
+      key    = export.value.key
+    }
+  }
+
+  depends_on = [scaleway_block_volume.this]
+}
+
+# Snapshots imported from Object Storage (import block provided)
+resource "scaleway_block_snapshot" "imported" {
+  for_each = {
+    for k, v in local.expanded_block_snapshots : k => v
+    if v.volume_key == null && v.import != null
+  }
+
+  name       = each.value.name
+  zone       = each.value.zone != null ? each.value.zone : "${var.region}-1"
+  project_id = data.scaleway_account_project.project.id
+  tags       = each.value.tags
+
+  # Import snapshot from Object Storage QCOW2 file
+  import {
+    bucket = each.value.import.bucket
+    key    = each.value.import.key
+  }
+
+  # Export can also be used with imported snapshots
+  dynamic "export" {
+    for_each = each.value.export != null ? [each.value.export] : []
+    content {
+      bucket = export.value.bucket
+      key    = export.value.key
+    }
+  }
+
+  depends_on = [scaleway_object_bucket.this]
+}

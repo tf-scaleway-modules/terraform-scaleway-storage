@@ -1,17 +1,23 @@
-# Scaleway Object Storage Terraform Module
+# Scaleway Storage Terraform Module
 
 [![Apache 2.0][apache-shield]][apache]
 [![Terraform][terraform-badge]][terraform-url]
 [![Scaleway Provider][scaleway-badge]][scaleway-url]
 [![Latest Release][release-badge]][release-url]
 
-A **production-ready** Terraform/OpenTofu module for creating and managing Scaleway Object Storage infrastructure with comprehensive features for enterprise deployments.
+A **production-ready** Terraform/OpenTofu module for creating and managing Scaleway storage infrastructure including Object Storage (S3-compatible) and Block Storage (network-attached SSDs).
 
 ## Overview
 
-This module provides a complete solution for managing Scaleway Object Storage resources, including buckets, lifecycle policies, static website hosting, WORM compliance, and more. It follows infrastructure-as-code best practices with extensive validation and sensible defaults.
+This module provides a complete solution for managing Scaleway storage resources:
+- **Object Storage**: S3-compatible buckets with lifecycle policies, static website hosting, WORM compliance, and more
+- **Block Storage**: Network-attached SSD volumes and snapshots for persistent storage
+
+It follows infrastructure-as-code best practices with extensive validation and sensible defaults.
 
 ### Key Features
+
+#### Object Storage (S3-Compatible)
 
 | Feature | Description |
 |---------|-------------|
@@ -24,6 +30,16 @@ This module provides a complete solution for managing Scaleway Object Storage re
 | **Object Lock (WORM)** | Compliance and governance modes for regulatory requirements |
 | **CORS Support** | Cross-Origin Resource Sharing for web applications |
 | **Object Uploads** | Upload files or inline content during provisioning |
+
+#### Block Storage (Network-Attached SSDs)
+
+| Feature | Description |
+|---------|-------------|
+| **Block Volumes** | Network-attached SSD storage independent of Instance lifecycle |
+| **High Performance** | Up to 15,000 IOPS for demanding workloads |
+| **Snapshots** | Point-in-time backups for disaster recovery and cloning |
+| **Flexible Sizing** | 5 GB to 10 TB per volume |
+| **Zone Selection** | Deploy in any availability zone within the region |
 
 ### Expanded Bucket Keys
 
@@ -40,6 +56,13 @@ Always reference buckets using expanded keys in outputs, objects, and policies.
 - Terraform >= 1.10.7 or OpenTofu >= 1.10
 - Scaleway account with API credentials configured
 - Existing Scaleway project
+
+### Examples
+
+| Example | Description |
+|---------|-------------|
+| [minimal](examples/minimal/) | Simple single bucket setup |
+| [complete](examples/complete/) | Full-featured example with Object Storage and Block Storage |
 
 ### Minimal Example
 
@@ -258,6 +281,95 @@ module "storage" {
   # Bucket policies with Version 2023-04-17 require explicit permissions for ALL operations
   # A policy with only Principal:"*" will block Terraform from managing the bucket
 }
+```
+
+### Block Storage Volumes
+
+```hcl
+module "storage" {
+  source = "git::https://gitlab.com/leminnov/terraform/modules/scaleway-storage.git"
+
+  organization_id = var.scw_organization_id
+  project_name    = "production"
+  region          = "fr-par"
+
+  # Block Storage Volumes
+  block_volumes = {
+    # Single database volume (creates: database-1)
+    database = {
+      name            = "postgresql-data"
+      size_in_gb      = 100
+      iops            = 15000  # High performance for database
+      zone            = "fr-par-1"
+      prevent_destroy = true   # Document production intent
+      tags            = ["database", "production"]
+    }
+
+    # Multiple app volumes (creates: app-1, app-2, app-3)
+    app = {
+      name       = "app-data"
+      count      = 3           # Create 3 volumes
+      size_in_gb = 50
+      iops       = 5000        # Standard performance
+      zone       = "fr-par-1"
+      tags       = ["application", "production"]
+    }
+  }
+
+  # Create snapshots for backup
+  # Note: volume_key must use expanded key format
+  block_snapshots = {
+    database_backup = {
+      name       = "postgresql-backup-initial"
+      volume_key = "database-1"  # Expanded key (count=1 → database-1)
+      tags       = ["backup", "database"]
+    }
+
+    # Create 3 snapshots for app volumes
+    app_backup = {
+      count      = 3
+      volume_key = "app-1"       # Snapshot the first app volume
+      tags       = ["backup", "app"]
+    }
+  }
+}
+
+output "database_volume_id" {
+  value = module.storage.block_volume_ids["database-1"]  # Expanded key
+}
+
+output "app_volume_ids" {
+  value = {
+    app_1 = module.storage.block_volume_ids["app-1"]
+    app_2 = module.storage.block_volume_ids["app-2"]
+    app_3 = module.storage.block_volume_ids["app-3"]
+  }
+}
+```
+
+### Block Storage from Snapshot (Cloning)
+
+```hcl
+module "storage" {
+  source = "git::https://gitlab.com/leminnov/terraform/modules/scaleway-storage.git"
+
+  organization_id = var.scw_organization_id
+  project_name    = "staging"
+  region          = "fr-par"
+
+  block_volumes = {
+    # Create volume from existing snapshot for testing
+    database_clone = {
+      name        = "postgresql-staging"
+      size_in_gb  = 100
+      iops        = 5000
+      zone        = "fr-par-1"
+      snapshot_id = "fr-par-1/11111111-1111-1111-1111-111111111111"  # Source snapshot
+      tags        = ["database", "staging"]
+    }
+  }
+}
+```
 
 # Example bucket policy (use with caution - see Security section):
 # bucket_policies = {
@@ -308,6 +420,27 @@ module "storage" {
 │  │              S3-Compatible API Endpoint             │         │
 │  │         https://s3.fr-par.scw.cloud                │         │
 │  └────────────────────────────────────────────────────┘         │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│                     Scaleway Block Storage                       │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐           │
+│  │   Volume     │  │   Volume     │  │   Snapshot   │           │
+│  │  (database)  │  │   (logs)     │  │   (backup)   │           │
+│  ├──────────────┤  ├──────────────┤  ├──────────────┤           │
+│  │ • 15K IOPS   │  │ • 5K IOPS    │  │ • Source:    │           │
+│  │ • 100 GB     │  │ • 50 GB      │  │   database   │           │
+│  │ • fr-par-1   │  │ • fr-par-1   │  │ • fr-par-1   │           │
+│  └──────────────┘  └──────────────┘  └──────────────┘           │
+│         │                 │                 ▲                    │
+│         ▼                 ▼                 │                    │
+│  ┌────────────────────────────────┐        │                    │
+│  │     Attach to Instances        │────────┘                    │
+│  │   (via scaleway_instance_*)    │   (restore/clone)           │
+│  └────────────────────────────────┘                             │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -380,6 +513,8 @@ No modules.
 
 | Name | Type |
 |------|------|
+| [scaleway_block_snapshot.this](https://registry.terraform.io/providers/scaleway/scaleway/latest/docs/resources/block_snapshot) | resource |
+| [scaleway_block_volume.this](https://registry.terraform.io/providers/scaleway/scaleway/latest/docs/resources/block_volume) | resource |
 | [scaleway_object.this](https://registry.terraform.io/providers/scaleway/scaleway/latest/docs/resources/object) | resource |
 | [scaleway_object_bucket.this](https://registry.terraform.io/providers/scaleway/scaleway/latest/docs/resources/object_bucket) | resource |
 | [scaleway_object_bucket_acl.this](https://registry.terraform.io/providers/scaleway/scaleway/latest/docs/resources/object_bucket_acl) | resource |
@@ -400,6 +535,8 @@ No modules.
 | <a name="input_project_name"></a> [project\_name](#input\_project\_name) | Scaleway Project name where all resources will be created.<br/><br/>Projects provide logical isolation within an organization.<br/>All buckets, objects, and policies will be created in this project.<br/><br/>Naming rules:<br/>- Must start with a lowercase letter<br/>- Can contain lowercase letters, numbers, and hyphens<br/>- Must be 2-63 characters long | `string` | n/a | yes |
 | <a name="input_region"></a> [region](#input\_region) | Scaleway region for object storage.<br/><br/>Available regions:<br/>- fr-par: Paris, France (Europe)<br/>- nl-ams: Amsterdam, Netherlands (Europe)<br/>- pl-waw: Warsaw, Poland (Europe)<br/><br/>Choose the region closest to your users for optimal latency.<br/>Data residency requirements may also influence this choice. | `string` | `"fr-par"` | no |
 | <a name="input_tags"></a> [tags](#input\_tags) | Global tags applied to all resources.<br/><br/>Tags are key-value pairs for organizing and categorizing resources.<br/>Common uses:<br/>- Environment identification (environment:production)<br/>- Cost allocation (team:platform, project:website)<br/>- Automation (managed-by:terraform)<br/><br/>Format: Map of strings (e.g., {env = "prod", team = "devops"}) | `map(string)` | `{}` | no |
+| <a name="input_block_volumes"></a> [block\_volumes](#input\_block\_volumes) | Map of Block Storage volumes to create.<br/><br/>Network-attached SSD storage for Scaleway Instances.<br/>Volumes persist independently of Instance lifecycle.<br/><br/>VOLUME CONFIGURATION:<br/>name        : Volume name (auto-generated if null)<br/>size\_in\_gb  : Volume size in GB (5-10000)<br/>iops        : Performance tier (5000 or 15000)<br/>zone        : Availability zone (e.g., fr-par-1)<br/>snapshot\_id : Create from existing snapshot<br/>tags        : Resource tags | <pre>map(object({<br/>  name        = optional(string)<br/>  size_in_gb  = number<br/>  iops        = number<br/>  zone        = optional(string, "fr-par-1")<br/>  snapshot_id = optional(string)<br/>  tags        = optional(list(string), [])<br/>}))</pre> | `{}` | no |
+| <a name="input_block_snapshots"></a> [block\_snapshots](#input\_block\_snapshots) | Map of Block Storage snapshots to create.<br/><br/>Point-in-time snapshots for backup and volume cloning.<br/><br/>SNAPSHOT CONFIGURATION:<br/>name       : Snapshot name (auto-generated if null)<br/>volume\_key : Reference to volume in block\_volumes<br/>zone       : Availability zone (defaults to volume zone)<br/>tags       : Resource tags | <pre>map(object({<br/>  name       = optional(string)<br/>  volume_key = string<br/>  zone       = optional(string)<br/>  tags       = optional(list(string), [])<br/>}))</pre> | `{}` | no |
 
 ## Outputs
 
@@ -420,6 +557,10 @@ No modules.
 | <a name="output_s3_endpoint"></a> [s3\_endpoint](#output\_s3\_endpoint) | S3 API endpoint for the configured region.<br/><br/>Use this endpoint to configure S3-compatible clients:<br/>- AWS CLI: aws configure set s3.endpoint\_url <endpoint><br/>- AWS SDK: endpoint\_url parameter<br/>- s3cmd, rclone, etc. |
 | <a name="output_website_endpoints"></a> [website\_endpoints](#output\_website\_endpoints) | Map of bucket keys to their static website endpoints.<br/><br/>Only populated for buckets with website configuration.<br/>Format: https://<bucket-name>.s3-website.<region>.scw.cloud |
 | <a name="output_website_urls"></a> [website\_urls](#output\_website\_urls) | Simple map of bucket keys to website URLs (for buckets with website config). |
+| <a name="output_block_volumes"></a> [block\_volumes](#output\_block\_volumes) | Map of all created Block Storage volumes with their details.<br/><br/>Each volume includes:<br/>- id: Volume ID (zoned format: zone/uuid)<br/>- name: Volume name<br/>- size\_in\_gb: Volume size<br/>- iops: IOPS performance tier<br/>- zone: Availability Zone |
+| <a name="output_block_volume_ids"></a> [block\_volume\_ids](#output\_block\_volume\_ids) | Map of volume keys to their Scaleway resource IDs. |
+| <a name="output_block_snapshots"></a> [block\_snapshots](#output\_block\_snapshots) | Map of all created Block Storage snapshots with their details.<br/><br/>Each snapshot includes:<br/>- id: Snapshot ID<br/>- name: Snapshot name<br/>- volume\_id: Source volume ID<br/>- zone: Availability Zone |
+| <a name="output_block_snapshot_ids"></a> [block\_snapshot\_ids](#output\_block\_snapshot\_ids) | Map of snapshot keys to their Scaleway resource IDs. |
 <!-- END_TF_DOCS -->
 
 ## Bucket Configuration Reference
@@ -438,6 +579,84 @@ No modules.
 | `website` | object | `null` | Static website configuration |
 
 > **Security Note**: `public-read-write` ACL is blocked for security reasons. Use bucket policies for controlled write access.
+
+## Block Storage Configuration Reference
+
+### Expanded Volume Keys
+
+Similar to buckets, block volumes and snapshots use expanded keys:
+- `count = 1` → `volume-1` (default)
+- `count = 3` → `volume-1`, `volume-2`, `volume-3`
+
+Always reference volumes using expanded keys in snapshots and outputs.
+
+### Block Volume
+
+| Attribute | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | string | auto | Volume name (defaults to `<key>-volume`) |
+| `count` | number | `1` | Number of volume instances to create |
+| `size_in_gb` | number | required | Volume size in GB (5-10000) |
+| `iops` | number | required | Performance tier: `5000` (standard) or `15000` (high) |
+| `zone` | string | `"fr-par-1"` | Availability zone |
+| `snapshot_id` | string | `null` | Create volume from snapshot |
+| `prevent_destroy` | bool | `false` | Document intent for lifecycle protection |
+| `tags` | list(string) | `[]` | Resource tags |
+
+> **Note**: `prevent_destroy` is for documentation purposes. Terraform requires literal values for lifecycle blocks - manually set `prevent_destroy = true` in the module code for production.
+
+### Block Snapshot
+
+| Attribute | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | string | auto | Snapshot name (defaults to `<key>-snapshot`) |
+| `count` | number | `1` | Number of snapshot instances to create |
+| `volume_key` | string | required* | Reference to **expanded** volume key (e.g., `database-1`) |
+| `zone` | string | volume zone | Availability zone |
+| `tags` | list(string) | `[]` | Resource tags |
+| `export` | object | `null` | Export snapshot to Object Storage (see below) |
+| `import` | object | `null` | Import snapshot from Object Storage (see below) |
+
+*`volume_key` is required unless `import` is specified.
+
+### Snapshot Export (to Object Storage)
+
+Export snapshots as QCOW2 files to Object Storage for offsite backup:
+
+```hcl
+block_snapshots = {
+  database_backup = {
+    volume_key = "database-1"
+    export = {
+      bucket = "my-backup-bucket"           # Must exist
+      key    = "snapshots/db-backup.qcow2"  # .qcow or .qcow2
+    }
+  }
+}
+```
+
+### Snapshot Import (from Object Storage)
+
+Create snapshots from QCOW2 files in Object Storage (no `volume_key` needed):
+
+```hcl
+block_snapshots = {
+  restored_db = {
+    zone = "fr-par-1"
+    import = {
+      bucket = "my-backup-bucket"
+      key    = "snapshots/db-backup.qcow2"
+    }
+  }
+}
+```
+
+### IOPS Performance Tiers
+
+| IOPS | Tier | Use Case |
+|------|------|----------|
+| `5000` | Standard | General workloads, logs, media storage |
+| `15000` | High Performance | Databases, high-throughput applications |
 
 ## Security Best Practices
 
