@@ -22,7 +22,10 @@ module "storage" {
 
   # Region and global tags
   region = "fr-par"
-  tags   = ["environment:${var.environment}", "managed-by:terraform"]
+  tags = {
+    environment = var.environment
+    managed-by  = "terraform"
+  }
 
   # ---------------------------------------------------------------------------
   # Bucket Configurations
@@ -75,7 +78,7 @@ module "storage" {
         }
       ]
 
-      tags = ["type:data"]
+      tags = { type = "data" }
     }
 
     # -------------------------------------------------------------------------
@@ -98,7 +101,7 @@ module "storage" {
         }
       ]
 
-      tags = ["type:assets", "public:true"]
+      tags = { type = "assets", public = "true" }
     }
 
     # -------------------------------------------------------------------------
@@ -124,7 +127,7 @@ module "storage" {
         }
       ]
 
-      tags = ["type:website", "public:true"]
+      tags = { type = "website", public = "true" }
     }
 
     # -------------------------------------------------------------------------
@@ -149,7 +152,7 @@ module "storage" {
         }
       ]
 
-      tags = ["type:backup", "critical:true"]
+      tags = { type = "backup", critical = "true" }
     }
 
     # -------------------------------------------------------------------------
@@ -164,32 +167,45 @@ module "storage" {
     #   versioning          = true    # Required for object lock
     #   object_lock_enabled = true    # Enable WORM
     #   force_destroy       = false
-    #   tags                = ["type:compliance", "retention:enabled"]
+    #   tags                = { type = "compliance", retention = "enabled" }
     # }
   }
 
   # ---------------------------------------------------------------------------
-  # Bucket Policies
+  # Bucket Policies (Optional)
   # ---------------------------------------------------------------------------
-
-  bucket_policies = {
-    # Public read policy for assets (more secure than ACL)
-    assets_cdn_policy = {
-      bucket_key = "assets"
-      policy = jsonencode({
-        Version = "2012-10-17"
-        Statement = [
-          {
-            Sid       = "AllowPublicRead"
-            Effect    = "Allow"
-            Principal = "*"
-            Action    = ["s3:GetObject"]
-            Resource  = ["arn:scw:s3:::${var.prefix}-assets-${var.environment}/*"]
-          }
-        ]
-      })
-    }
-  }
+  # Note: For simple public access, use ACL (acl = "public-read") instead.
+  # Bucket policies with Version 2023-04-17 require explicit permissions for
+  # ALL operations - a policy with only s3:GetObject will block Terraform from
+  # managing the bucket. Only use policies when you need fine-grained control
+  # and can specify your user_id/application_id as Principal.
+  #
+  # Example policy structure (requires your SCW user_id or application_id):
+  # bucket_policies = {
+  #   assets_policy = {
+  #     bucket_key = "assets"
+  #     policy = jsonencode({
+  #       Version = "2023-04-17"
+  #       Statement = [
+  #         {
+  #           Sid       = "TerraformAccess"
+  #           Effect    = "Allow"
+  #           Principal = { SCW = "user_id:<YOUR_USER_ID>" }
+  #           Action    = "s3:*"
+  #           Resource  = ["<BUCKET_NAME>", "<BUCKET_NAME>/*"]
+  #         },
+  #         {
+  #           Sid       = "PublicRead"
+  #           Effect    = "Allow"
+  #           Principal = "*"
+  #           Action    = "s3:GetObject"
+  #           Resource  = "<BUCKET_NAME>/*"
+  #         }
+  #       ]
+  #     })
+  #   }
+  # }
+  bucket_policies = {}
 
   # ---------------------------------------------------------------------------
   # Object Lock Configuration (Uncomment if using compliance bucket)
@@ -260,16 +276,19 @@ module "storage" {
 variable "organization_id" {
   description = "Scaleway Organization ID (UUID format)"
   type        = string
+  default     = "f3d8393e-008a-4fb2-a4ff-81b6fe5c01b0"
 }
 
 variable "project_name" {
   description = "Scaleway Project name where resources will be created"
   type        = string
+  default     = "default"
 }
 
 variable "prefix" {
   description = "Prefix for bucket names (must be globally unique across Scaleway)"
   type        = string
+  default     = "test-storage"
 
   validation {
     condition     = can(regex("^[a-z][a-z0-9-]{2,20}$", var.prefix))
@@ -278,12 +297,12 @@ variable "prefix" {
 }
 
 variable "environment" {
-  description = "Environment name (development, staging, production)"
+  description = "Environment name (development, integration, staging, production, dev, int, prod)"
   type        = string
-  default     = "development"
+  default     = "dev"
 
   validation {
-    condition     = contains(["development", "staging", "production"], var.environment)
+    condition     = contains(["development", "integration", "staging", "production", "dev", "int", "prod"], var.environment)
     error_message = "Environment must be: development, staging, or production."
   }
 }

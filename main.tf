@@ -101,7 +101,7 @@ resource "scaleway_object_bucket" "this" {
   }
 
   # Tags for resource organization and cost allocation
-  tags = concat(var.tags, each.value.tags)
+  tags = merge(var.tags, each.value.tags)
 
   # Lifecycle meta-argument (Terraform, not S3)
   lifecycle {

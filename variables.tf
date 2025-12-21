@@ -86,10 +86,10 @@ variable "tags" {
     - Cost allocation (team:platform, project:website)
     - Automation (managed-by:terraform)
 
-    Format: List of strings (e.g., ["env:prod", "team:devops"])
+    Format: Map of strings (e.g., {env = "prod", team = "devops"})
   EOT
-  type        = list(string)
-  default     = []
+  type        = map(string)
+  default     = {}
 }
 
 # ==============================================================================
@@ -145,7 +145,7 @@ variable "buckets" {
     force_destroy       = optional(bool, false)
     object_lock_enabled = optional(bool, false)
     versioning          = optional(bool, false)
-    tags                = optional(list(string), [])
+    tags                = optional(map(string), {})
 
     # CORS configuration for web access
     cors_rules = optional(list(object({
