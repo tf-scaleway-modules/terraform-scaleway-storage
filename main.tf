@@ -21,7 +21,7 @@
 # ==============================================================================
 
 resource "scaleway_object_bucket" "this" {
-  for_each = var.buckets
+  for_each = local.expanded_buckets
 
   # Core bucket configuration
   name       = each.value.name
@@ -122,7 +122,7 @@ resource "scaleway_object_bucket" "this" {
 # ==============================================================================
 
 resource "scaleway_object_bucket_acl" "this" {
-  for_each = { for k, v in var.buckets : k => v if v.acl != "private" }
+  for_each = { for k, v in local.expanded_buckets : k => v if v.acl != "private" }
 
   bucket     = scaleway_object_bucket.this[each.key].name
   region     = var.region
@@ -144,7 +144,7 @@ resource "scaleway_object_bucket_acl" "this" {
 # ==============================================================================
 
 resource "scaleway_object_bucket_website_configuration" "this" {
-  for_each = { for k, v in var.buckets : k => v if v.website != null }
+  for_each = { for k, v in local.expanded_buckets : k => v if v.website != null }
 
   bucket     = scaleway_object_bucket.this[each.key].name
   region     = var.region

@@ -33,11 +33,12 @@ module "storage" {
 
   buckets = {
     # -------------------------------------------------------------------------
-    # Private Data Bucket
+    # Private Data Buckets (count: 3)
     # -------------------------------------------------------------------------
     # For application data with versioning and lifecycle management
     data = {
       name          = "${var.prefix}-data-${var.environment}"
+      count         = 3  # Creates: data-1, data-2, data-3
       acl           = "private"
       versioning    = true
       force_destroy = var.environment != "production"
@@ -82,11 +83,12 @@ module "storage" {
     }
 
     # -------------------------------------------------------------------------
-    # Public Assets Bucket
+    # Public Assets Bucket (count: 1)
     # -------------------------------------------------------------------------
     # For static assets served via CDN or direct access
     assets = {
       name          = "${var.prefix}-assets-${var.environment}"
+      count         = 1  # Creates: assets-1
       acl           = "public-read"
       force_destroy = var.environment != "production"
 
@@ -105,11 +107,12 @@ module "storage" {
     }
 
     # -------------------------------------------------------------------------
-    # Static Website Bucket
+    # Static Website Buckets (count: 4)
     # -------------------------------------------------------------------------
     # For hosting static websites
     website = {
       name          = "${var.prefix}-website-${var.environment}"
+      count         = 4  # Creates: website-1, website-2, website-3, website-4
       acl           = "public-read"
       force_destroy = var.environment != "production"
 
@@ -131,11 +134,12 @@ module "storage" {
     }
 
     # -------------------------------------------------------------------------
-    # Backup Bucket
+    # Backup Bucket (count: 1)
     # -------------------------------------------------------------------------
     # For backups with versioning (never force_destroy)
     backup = {
-      name          = "${var.prefix}-backup-${var.environment}"
+      name          = "${var.prefix}-backup-v2-${var.environment}"
+      count         = 1  # Creates: backup-1
       acl           = "private"
       versioning    = true
       force_destroy = false # Never allow force destroy for backups
@@ -228,9 +232,9 @@ module "storage" {
   # ---------------------------------------------------------------------------
 
   objects = {
-    # robots.txt for website
+    # robots.txt for website-1 (first website bucket)
     robots_txt = {
-      bucket_key   = "website"
+      bucket_key   = "website-1"  # Reference expanded bucket key
       key          = "robots.txt"
       content      = "User-agent: *\nAllow: /"
       content_type = "text/plain"
@@ -239,7 +243,7 @@ module "storage" {
 
     # Health check endpoint
     health_json = {
-      bucket_key   = "website"
+      bucket_key   = "website-1"  # Reference expanded bucket key
       key          = "health.json"
       content      = jsonencode({ status = "ok", version = "1.0.0" })
       content_type = "application/json"
@@ -248,7 +252,7 @@ module "storage" {
 
     # Placeholder index page
     index_html = {
-      bucket_key   = "website"
+      bucket_key   = "website-1"  # Reference expanded bucket key
       key          = "index.html"
       content      = <<-HTML
         <!DOCTYPE html>

@@ -36,33 +36,34 @@ output "bucket_arns" {
 }
 
 # ==============================================================================
-# Individual Bucket Details
+# Individual Bucket Details (using expanded keys)
 # ==============================================================================
 
-output "data_bucket" {
-  description = "Data bucket connection details"
+output "data_buckets" {
+  description = "Data buckets connection details (data-1, data-2, data-3)"
   value = {
-    name     = module.storage.buckets["data"].name
-    endpoint = module.storage.bucket_endpoints["data"]
-    arn      = module.storage.bucket_arns["data"]
+    for k, v in module.storage.buckets : k => {
+      name     = v.name
+      endpoint = v.endpoint
+    } if startswith(k, "data-")
   }
 }
 
 output "assets_bucket" {
   description = "Assets bucket connection details"
   value = {
-    name     = module.storage.buckets["assets"].name
-    endpoint = module.storage.bucket_endpoints["assets"]
-    arn      = module.storage.bucket_arns["assets"]
+    name     = module.storage.buckets["assets-1"].name
+    endpoint = module.storage.bucket_endpoints["assets-1"]
+    arn      = module.storage.bucket_arns["assets-1"]
   }
 }
 
 output "backup_bucket" {
   description = "Backup bucket connection details"
   value = {
-    name     = module.storage.buckets["backup"].name
-    endpoint = module.storage.bucket_endpoints["backup"]
-    arn      = module.storage.bucket_arns["backup"]
+    name     = module.storage.buckets["backup-1"].name
+    endpoint = module.storage.bucket_endpoints["backup-1"]
+    arn      = module.storage.bucket_arns["backup-1"]
   }
 }
 
@@ -70,14 +71,14 @@ output "backup_bucket" {
 # Website Information
 # ==============================================================================
 
-output "website_url" {
-  description = "Static website URL"
-  value       = module.storage.website_urls["website"]
+output "website_urls" {
+  description = "Static website URLs (website-1 through website-4)"
+  value       = module.storage.website_urls
 }
 
 output "website_details" {
-  description = "Complete website configuration"
-  value       = module.storage.website_endpoints["website"]
+  description = "Complete website configuration for first website bucket"
+  value       = module.storage.website_endpoints["website-1"]
 }
 
 # ==============================================================================
@@ -131,13 +132,9 @@ output "quick_reference" {
     ║  $ aws configure set s3.endpoint_url ${module.storage.s3_endpoint}
     ║  $ aws configure set default.region ${module.storage.region}
     ║                                                                  ║
-    ║  Website URL:                                                    ║
-    ║  ${module.storage.website_urls["website"]}
+    ║  Website URLs: See website_urls output                           ║
     ║                                                                  ║
-    ║  Buckets:                                                        ║
-    ║  - data:   ${module.storage.bucket_endpoints["data"]}
-    ║  - assets: ${module.storage.bucket_endpoints["assets"]}
-    ║  - backup: ${module.storage.bucket_endpoints["backup"]}
+    ║  Buckets: See bucket_endpoints output for all ${length(module.storage.buckets)} buckets
     ║                                                                  ║
     ╚══════════════════════════════════════════════════════════════════╝
 
