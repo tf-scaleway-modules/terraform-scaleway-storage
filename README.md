@@ -15,14 +15,23 @@ This module provides a complete solution for managing Scaleway Object Storage re
 
 | Feature | Description |
 |---------|-------------|
-| **Multiple Buckets** | Create and manage multiple buckets with a single module call using `for_each` |
-| **Access Control** | ACLs (private, public-read, etc.) and IAM-style bucket policies |
+| **Multiple Buckets** | Create and manage multiple buckets with a single module call |
+| **Bucket Count** | Create N instances of each bucket type with `count` parameter |
+| **Access Control** | ACLs (private, public-read) - `public-read-write` blocked for security |
 | **Versioning** | Object versioning for data protection and recovery |
 | **Lifecycle Rules** | Automatic transitions to GLACIER, expiration, multipart cleanup |
 | **Static Websites** | Host static websites with custom index and error pages |
 | **Object Lock (WORM)** | Compliance and governance modes for regulatory requirements |
 | **CORS Support** | Cross-Origin Resource Sharing for web applications |
 | **Object Uploads** | Upload files or inline content during provisioning |
+
+### Expanded Bucket Keys
+
+When you define a bucket, it gets an expanded key with a suffix:
+- `count = 1` → `bucket-1` (name unchanged)
+- `count = 3` → `bucket-1`, `bucket-2`, `bucket-3` (names get `-1`, `-2`, `-3`)
+
+Always reference buckets using expanded keys in outputs, objects, and policies.
 
 ## Quick Start
 
@@ -49,7 +58,7 @@ module "storage" {
 }
 
 output "bucket_endpoint" {
-  value = module.storage.bucket_endpoints["data"]
+  value = module.storage.bucket_endpoints["data-1"]  # Use expanded key
 }
 ```
 
@@ -64,7 +73,7 @@ module "storage" {
   organization_id = var.scw_organization_id
   project_name    = "production"
   region          = "fr-par"
-  tags            = ["environment:production", "managed-by:terraform"]
+  tags            = { environment = "production", managed-by = "terraform" }
 
   buckets = {
     logs = {
@@ -99,7 +108,7 @@ module "storage" {
         }
       ]
 
-      tags = ["type:logs", "retention:1year"]
+      tags = { type = "logs", retention = "1year" }
     }
   }
 }
@@ -135,21 +144,21 @@ module "website" {
         }
       ]
 
-      tags = ["type:website"]
+      tags = { type = "website" }
     }
   }
 
-  # Upload initial files
+  # Upload initial files (use expanded bucket key: "website-1")
   objects = {
     index = {
-      bucket_key   = "website"
+      bucket_key   = "website-1"  # Expanded key (count defaults to 1)
       key          = "index.html"
       content      = "<html><body><h1>Welcome!</h1></body></html>"
       content_type = "text/html"
       visibility   = "public-read"
     }
     robots = {
-      bucket_key   = "website"
+      bucket_key   = "website-1"  # Expanded key
       key          = "robots.txt"
       content      = "User-agent: *\nAllow: /"
       content_type = "text/plain"
@@ -159,7 +168,7 @@ module "website" {
 }
 
 output "website_url" {
-  value = module.website.website_urls["website"]
+  value = module.website.website_urls["website-1"]
 }
 ```
 
@@ -181,13 +190,13 @@ module "compliance" {
       object_lock_enabled = true    # Enable WORM - cannot be disabled!
       force_destroy       = false
 
-      tags = ["type:compliance", "retention:7years"]
+      tags = { type = "compliance", retention = "7years" }
     }
   }
 
   bucket_lock_configurations = {
     audit_lock = {
-      bucket_key = "audit"
+      bucket_key = "audit-1"  # Use expanded bucket key
       rule = {
         default_retention = {
           mode  = "COMPLIANCE"  # Cannot be overridden by anyone
@@ -208,26 +217,26 @@ module "storage" {
   organization_id = var.scw_organization_id
   project_name    = var.project_name
   region          = "fr-par"
-  tags            = ["environment:${var.environment}"]
+  tags            = { environment = var.environment }
 
   buckets = {
-    # Application data
+    # Application data (creates: data-1)
     data = {
       name          = "${var.prefix}-data-${var.environment}"
       versioning    = true
       force_destroy = var.environment != "production"
-      tags          = ["type:data"]
+      tags          = { type = "data" }
     }
 
-    # Static assets (CDN origin)
+    # Static assets (creates: assets-1)
     assets = {
       name          = "${var.prefix}-assets-${var.environment}"
       acl           = "public-read"
       force_destroy = var.environment != "production"
-      tags          = ["type:assets"]
+      tags          = { type = "assets" }
     }
 
-    # Backups
+    # Backups (creates: backup-1)
     backup = {
       name          = "${var.prefix}-backup-${var.environment}"
       versioning    = true
@@ -241,27 +250,41 @@ module "storage" {
         }
       }]
 
-      tags = ["type:backup"]
+      tags = { type = "backup" }
     }
   }
 
-  # CDN policy for assets
-  bucket_policies = {
-    assets_cdn = {
-      bucket_key = "assets"
-      policy = jsonencode({
-        Version = "2012-10-17"
-        Statement = [{
-          Sid       = "CDNAccess"
-          Effect    = "Allow"
-          Principal = "*"
-          Action    = ["s3:GetObject"]
-          Resource  = ["arn:scw:s3:::${var.prefix}-assets-${var.environment}/*"]
-        }]
-      })
-    }
-  }
+  # Note: For simple public read access, use acl = "public-read" instead of policies
+  # Bucket policies with Version 2023-04-17 require explicit permissions for ALL operations
+  # A policy with only Principal:"*" will block Terraform from managing the bucket
 }
+
+# Example bucket policy (use with caution - see Security section):
+# bucket_policies = {
+#   assets_cdn = {
+#     bucket_key = "assets-1"  # Must use expanded key
+#     policy = jsonencode({
+#       Version = "2023-04-17"  # Scaleway version, NOT AWS "2012-10-17"
+#       Id      = "CDNAccess"
+#       Statement = [
+#         {
+#           Sid       = "TerraformAccess"
+#           Effect    = "Allow"
+#           Principal = { SCW = "user_id:<YOUR_USER_ID>" }  # Your Scaleway user
+#           Action    = "s3:*"
+#           Resource  = ["${var.prefix}-assets-${var.environment}", "${var.prefix}-assets-${var.environment}/*"]
+#         },
+#         {
+#           Sid       = "PublicRead"
+#           Effect    = "Allow"
+#           Principal = "*"
+#           Action    = "s3:GetObject"
+#           Resource  = "${var.prefix}-assets-${var.environment}/*"
+#         }
+#       ]
+#     })
+#   }
+# }
 ```
 
 ## Architecture
@@ -340,59 +363,63 @@ terraform {
 
 | Name | Version |
 |------|---------|
-| terraform | >= 1.10.7 |
-| scaleway | ~> 2.64 |
+| <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.10.7 |
+| <a name="requirement_scaleway"></a> [scaleway](#requirement\_scaleway) | ~> 2.64 |
 
 ## Providers
 
 | Name | Version |
 |------|---------|
-| scaleway | ~> 2.64 |
+| <a name="provider_scaleway"></a> [scaleway](#provider\_scaleway) | 2.65.1 |
+
+## Modules
+
+No modules.
 
 ## Resources
 
 | Name | Type |
 |------|------|
-| scaleway_object_bucket | resource |
-| scaleway_object_bucket_acl | resource |
-| scaleway_object_bucket_website_configuration | resource |
-| scaleway_object_bucket_lock_configuration | resource |
-| scaleway_object_bucket_policy | resource |
-| scaleway_object | resource |
-| scaleway_account_project | data source |
+| [scaleway_object.this](https://registry.terraform.io/providers/scaleway/scaleway/latest/docs/resources/object) | resource |
+| [scaleway_object_bucket.this](https://registry.terraform.io/providers/scaleway/scaleway/latest/docs/resources/object_bucket) | resource |
+| [scaleway_object_bucket_acl.this](https://registry.terraform.io/providers/scaleway/scaleway/latest/docs/resources/object_bucket_acl) | resource |
+| [scaleway_object_bucket_lock_configuration.this](https://registry.terraform.io/providers/scaleway/scaleway/latest/docs/resources/object_bucket_lock_configuration) | resource |
+| [scaleway_object_bucket_policy.this](https://registry.terraform.io/providers/scaleway/scaleway/latest/docs/resources/object_bucket_policy) | resource |
+| [scaleway_object_bucket_website_configuration.this](https://registry.terraform.io/providers/scaleway/scaleway/latest/docs/resources/object_bucket_website_configuration) | resource |
+| [scaleway_account_project.project](https://registry.terraform.io/providers/scaleway/scaleway/latest/docs/data-sources/account_project) | data source |
 
 ## Inputs
 
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
-| organization_id | Scaleway Organization ID (UUID format) | `string` | n/a | yes |
-| project_name | Scaleway Project name | `string` | n/a | yes |
-| region | Scaleway region: fr-par, nl-ams, pl-waw | `string` | `"fr-par"` | no |
-| tags | Global tags for all resources | `list(string)` | `[]` | no |
-| buckets | Map of bucket configurations | `map(object)` | `{}` | no |
-| bucket_policies | Map of IAM-style bucket policies | `map(object)` | `{}` | no |
-| bucket_lock_configurations | Map of WORM configurations | `map(object)` | `{}` | no |
-| objects | Map of objects to upload | `map(object)` | `{}` | no |
+| <a name="input_bucket_lock_configurations"></a> [bucket\_lock\_configurations](#input\_bucket\_lock\_configurations) | Map of object lock configurations for WORM compliance.<br/><br/>Object lock prevents object deletion or modification for a retention period.<br/>IMPORTANT: The bucket must have object\_lock\_enabled = true.<br/><br/>LOCK MODES:<br/>───────────<br/>GOVERNANCE  : Can be overridden by users with s3:BypassGovernanceRetention permission<br/>COMPLIANCE  : Cannot be overridden by anyone, including root account (irreversible!)<br/><br/>RETENTION PERIOD (specify exactly one):<br/>───────────────────────────────────────<br/>days  : Number of days to retain (1-36500)<br/>years : Number of years to retain (1-100)<br/><br/>WARNING: COMPLIANCE mode with long retention can make data permanently<br/>immutable. Test thoroughly in non-production environments first. | <pre>map(object({<br/>    bucket_key = string<br/>    rule = object({<br/>      default_retention = object({<br/>        mode  = string<br/>        days  = optional(number)<br/>        years = optional(number)<br/>      })<br/>    })<br/>  }))</pre> | `{}` | no |
+| <a name="input_bucket_policies"></a> [bucket\_policies](#input\_bucket\_policies) | Map of bucket policies to apply.<br/><br/>Policies provide fine-grained access control using IAM-style JSON documents.<br/>More flexible than ACLs for complex access patterns.<br/><br/>POLICY STRUCTURE:<br/>─────────────────<br/>bucket\_key : Reference to bucket key in var.buckets<br/>policy     : JSON policy document (use jsonencode() for safety)<br/><br/>POLICY DOCUMENT FORMAT (Scaleway S3-compatible):<br/>────────────────────────────────────────────────<br/>{<br/>  "Version": "2023-04-17",<br/>  "Id": "MyPolicy",<br/>  "Statement": [<br/>    {<br/>      "Sid": "UniqueStatementId",<br/>      "Effect": "Allow",<br/>      "Principal": "*" \| { "SCW": "user\_id:<USER\_ID>" },<br/>      "Action": ["s3:GetObject", "s3:PutObject", ...],<br/>      "Resource": ["<bucket-name>/*"]<br/>    }<br/>  ]<br/>}<br/><br/>IMPORTANT NOTES:<br/>────────────────<br/>- Use Version "2023-04-17" (Scaleway's current version, NOT AWS's "2012-10-17")<br/>- Resource format is "<bucket-name>/*" (NOT "arn:scw:s3:::bucket-name/*")<br/>- With 2023-04-17, only explicitly allowed actions are permitted (implicit deny)<br/>- A policy with only Principal:"*" will block your Terraform user from managing the bucket<br/>- Always include your user\_id/application\_id with full S3 permissions<br/><br/>COMMON ACTIONS:<br/>───────────────<br/>s3:GetObject       - Download objects<br/>s3:PutObject       - Upload objects<br/>s3:DeleteObject    - Delete objects<br/>s3:ListBucket      - List bucket contents<br/>s3:GetBucketPolicy - Read bucket policy | <pre>map(object({<br/>    bucket_key = string<br/>    policy     = string<br/>  }))</pre> | `{}` | no |
+| <a name="input_buckets"></a> [buckets](#input\_buckets) | Map of object storage buckets to create.<br/><br/>Each bucket key becomes a reference for other resources (policies, objects).<br/>Bucket names must be globally unique across all Scaleway users.<br/><br/>BUCKET CONFIGURATION OPTIONS:<br/>─────────────────────────────<br/>name                : (Required) Globally unique bucket name<br/>count               : Number of bucket instances to create (default: 1)<br/>acl                 : Access control - private, public-read, authenticated-read (public-read-write blocked for security)<br/>force\_destroy       : Allow deletion of non-empty bucket (default: false)<br/>object\_lock\_enabled : Enable WORM compliance - cannot be disabled once enabled<br/>versioning          : Keep multiple versions of objects<br/>tags                : Additional tags for this bucket<br/><br/>CORS RULES (for web browser access):<br/>────────────────────────────────────<br/>allowed\_headers : Headers allowed in preflight requests (default: ["*"])<br/>allowed\_methods : HTTP methods allowed (GET, PUT, POST, DELETE, HEAD)<br/>allowed\_origins : Origins allowed to make requests<br/>expose\_headers  : Headers exposed to browser<br/>max\_age\_seconds : Preflight cache duration (default: 3600)<br/><br/>LIFECYCLE RULES (automatic object management):<br/>──────────────────────────────────────────────<br/>id         : Unique rule identifier<br/>enabled    : Whether rule is active (default: true)<br/>prefix     : Apply to objects with this prefix (empty = all)<br/>expiration : Auto-delete after N days<br/>transition : Move to storage class (GLACIER, ONEZONE\_IA) after N days<br/>abort\_incomplete\_multipart\_upload : Clean up failed uploads<br/><br/>WEBSITE HOSTING:<br/>────────────────<br/>index\_document : Default page (e.g., "index.html")<br/>error\_document : Error page (default: "error.html") | <pre>map(object({<br/>    # Core bucket settings<br/>    name                = string<br/>    count               = optional(number, 1) # Number of buckets to create (appends -1, -2, etc. to name)<br/>    acl                 = optional(string, "private")<br/>    force_destroy       = optional(bool, false)<br/>    object_lock_enabled = optional(bool, false)<br/>    versioning          = optional(bool, false)<br/>    tags                = optional(map(string), {})<br/><br/>    # CORS configuration for web access<br/>    cors_rules = optional(list(object({<br/>      allowed_headers = optional(list(string), ["*"])<br/>      allowed_methods = list(string)<br/>      allowed_origins = list(string)<br/>      expose_headers  = optional(list(string), [])<br/>      max_age_seconds = optional(number, 3600)<br/>    })), [])<br/><br/>    # Lifecycle management rules<br/>    lifecycle_rules = optional(list(object({<br/>      id      = string<br/>      enabled = optional(bool, true)<br/>      prefix  = optional(string, "")<br/><br/>      expiration = optional(object({<br/>        days = number<br/>      }), null)<br/><br/>      transition = optional(list(object({<br/>        days          = number<br/>        storage_class = string<br/>      })), [])<br/><br/>      abort_incomplete_multipart_upload = optional(object({<br/>        days_after_initiation = number<br/>      }), null)<br/>    })), [])<br/><br/>    # Static website configuration<br/>    website = optional(object({<br/>      index_document = string<br/>      error_document = optional(string, "error.html")<br/>    }), null)<br/>  }))</pre> | `{}` | no |
+| <a name="input_objects"></a> [objects](#input\_objects) | Map of objects to upload to buckets.<br/><br/>Objects can be uploaded from local files or inline content.<br/>Use for configuration files, static assets, or initial seed data.<br/><br/>OBJECT CONFIGURATION:<br/>─────────────────────<br/>bucket\_key   : Reference to bucket key in var.buckets<br/>key          : Object path in bucket (e.g., "images/logo.png")<br/>source       : Local file path (mutually exclusive with content)<br/>content      : Inline string content (mutually exclusive with source)<br/>content\_type : MIME type (auto-detected if not specified)<br/>visibility   : private (default) or public-read<br/>tags         : Object-level tags<br/><br/>COMMON MIME TYPES:<br/>──────────────────<br/>text/html              - HTML files<br/>text/css               - CSS stylesheets<br/>text/javascript        - JavaScript files<br/>application/json       - JSON data<br/>image/png, image/jpeg  - Images<br/>application/pdf        - PDF documents | <pre>map(object({<br/>    bucket_key   = string<br/>    key          = string<br/>    source       = optional(string)<br/>    content      = optional(string)<br/>    content_type = optional(string)<br/>    visibility   = optional(string, "private")<br/>    tags         = optional(map(string), {})<br/>  }))</pre> | `{}` | no |
+| <a name="input_organization_id"></a> [organization\_id](#input\_organization\_id) | Scaleway Organization ID.<br/><br/>The organization is the top-level entity in Scaleway's hierarchy.<br/>Find this in the Scaleway Console under Organization Settings.<br/><br/>Format: UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx) | `string` | n/a | yes |
+| <a name="input_project_name"></a> [project\_name](#input\_project\_name) | Scaleway Project name where all resources will be created.<br/><br/>Projects provide logical isolation within an organization.<br/>All buckets, objects, and policies will be created in this project.<br/><br/>Naming rules:<br/>- Must start with a lowercase letter<br/>- Can contain lowercase letters, numbers, and hyphens<br/>- Must be 2-63 characters long | `string` | n/a | yes |
+| <a name="input_region"></a> [region](#input\_region) | Scaleway region for object storage.<br/><br/>Available regions:<br/>- fr-par: Paris, France (Europe)<br/>- nl-ams: Amsterdam, Netherlands (Europe)<br/>- pl-waw: Warsaw, Poland (Europe)<br/><br/>Choose the region closest to your users for optimal latency.<br/>Data residency requirements may also influence this choice. | `string` | `"fr-par"` | no |
+| <a name="input_tags"></a> [tags](#input\_tags) | Global tags applied to all resources.<br/><br/>Tags are key-value pairs for organizing and categorizing resources.<br/>Common uses:<br/>- Environment identification (environment:production)<br/>- Cost allocation (team:platform, project:website)<br/>- Automation (managed-by:terraform)<br/><br/>Format: Map of strings (e.g., {env = "prod", team = "devops"}) | `map(string)` | `{}` | no |
 
 ## Outputs
 
 | Name | Description |
 |------|-------------|
-| project_id | Scaleway Project ID |
-| region | Deployment region |
-| s3_endpoint | S3 API endpoint URL |
-| buckets | Complete bucket details map |
-| bucket_names | List of bucket names |
-| bucket_ids | Map of bucket keys to IDs |
-| bucket_endpoints | Map of bucket S3 endpoints |
-| bucket_arns | Map of bucket ARNs |
-| website_endpoints | Map of website configurations |
-| website_urls | Map of website URLs |
-| objects | Map of uploaded objects |
-| object_urls | Map of object URLs |
-| lock_configurations | Map of lock configurations |
-| aws_cli_config | AWS CLI configuration commands |
-| environment_variables | Environment variables for S3 tools |
+| <a name="output_aws_cli_config"></a> [aws\_cli\_config](#output\_aws\_cli\_config) | AWS CLI configuration commands for connecting to Scaleway Object Storage.<br/><br/>Run these commands to configure the AWS CLI:<br/>aws configure set s3.endpoint\_url <s3\_endpoint><br/>aws configure set default.region <region> |
+| <a name="output_bucket_arns"></a> [bucket\_arns](#output\_bucket\_arns) | Map of bucket keys to their ARN-style identifiers.<br/><br/>Format: arn:scw:s3:::<bucket-name><br/>Use in bucket policies and IAM configurations. |
+| <a name="output_bucket_endpoints"></a> [bucket\_endpoints](#output\_bucket\_endpoints) | Map of bucket keys to their S3 endpoints.<br/><br/>Format: https://<bucket-name>.s3.<region>.scw.cloud<br/>Use these URLs for direct bucket access via S3 protocol. |
+| <a name="output_bucket_ids"></a> [bucket\_ids](#output\_bucket\_ids) | Map of bucket keys to their Scaleway resource IDs. |
+| <a name="output_bucket_names"></a> [bucket\_names](#output\_bucket\_names) | List of all bucket names created by this module. |
+| <a name="output_buckets"></a> [buckets](#output\_buckets) | Map of all created buckets with their complete details.<br/><br/>Each bucket includes:<br/>- id: Scaleway resource ID<br/>- name: Bucket name<br/>- endpoint: S3 bucket endpoint URL<br/>- api\_endpoint: S3 API endpoint<br/>- versioning\_enabled: Whether versioning is active<br/>- object\_lock\_enabled: Whether WORM is enabled<br/>- tags: Applied tags |
+| <a name="output_environment_variables"></a> [environment\_variables](#output\_environment\_variables) | Environment variables for S3-compatible tools.<br/><br/>Export these in your shell or CI/CD pipeline:<br/>export AWS\_ENDPOINT\_URL\_S3=<endpoint><br/>export AWS\_REGION=<region> |
+| <a name="output_lock_configurations"></a> [lock\_configurations](#output\_lock\_configurations) | Map of bucket lock configurations for WORM compliance.<br/><br/>Includes retention mode and period for each configured bucket. |
+| <a name="output_object_urls"></a> [object\_urls](#output\_object\_urls) | Map of object keys to their direct URLs. |
+| <a name="output_objects"></a> [objects](#output\_objects) | Map of all uploaded objects with their details.<br/><br/>Includes object location, content type, and visibility. |
+| <a name="output_project_id"></a> [project\_id](#output\_project\_id) | Scaleway Project ID where all resources are created. |
+| <a name="output_region"></a> [region](#output\_region) | Region where all buckets are deployed. |
+| <a name="output_s3_endpoint"></a> [s3\_endpoint](#output\_s3\_endpoint) | S3 API endpoint for the configured region.<br/><br/>Use this endpoint to configure S3-compatible clients:<br/>- AWS CLI: aws configure set s3.endpoint\_url <endpoint><br/>- AWS SDK: endpoint\_url parameter<br/>- s3cmd, rclone, etc. |
+| <a name="output_website_endpoints"></a> [website\_endpoints](#output\_website\_endpoints) | Map of bucket keys to their static website endpoints.<br/><br/>Only populated for buckets with website configuration.<br/>Format: https://<bucket-name>.s3-website.<region>.scw.cloud |
+| <a name="output_website_urls"></a> [website\_urls](#output\_website\_urls) | Simple map of bucket keys to website URLs (for buckets with website config). |
 <!-- END_TF_DOCS -->
 
 ## Bucket Configuration Reference
@@ -400,14 +427,17 @@ terraform {
 | Attribute | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `name` | string | required | Globally unique bucket name (3-63 chars) |
-| `acl` | string | `"private"` | Access control: private, public-read, public-read-write, authenticated-read |
+| `count` | number | `1` | Number of bucket instances to create (appends -1, -2, etc.) |
+| `acl` | string | `"private"` | Access control: private, public-read, authenticated-read |
 | `force_destroy` | bool | `false` | Allow deletion of non-empty bucket |
 | `versioning` | bool | `false` | Enable object versioning |
 | `object_lock_enabled` | bool | `false` | Enable WORM (cannot be disabled once enabled) |
-| `tags` | list(string) | `[]` | Bucket-specific tags |
+| `tags` | map(string) | `{}` | Bucket-specific tags |
 | `cors_rules` | list(object) | `[]` | CORS configuration |
 | `lifecycle_rules` | list(object) | `[]` | Lifecycle management rules |
 | `website` | object | `null` | Static website configuration |
+
+> **Security Note**: `public-read-write` ACL is blocked for security reasons. Use bucket policies for controlled write access.
 
 ## Security Best Practices
 

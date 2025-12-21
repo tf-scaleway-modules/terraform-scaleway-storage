@@ -142,7 +142,7 @@ variable "buckets" {
   type = map(object({
     # Core bucket settings
     name                = string
-    count               = optional(number, 1)  # Number of buckets to create (appends -1, -2, etc. to name)
+    count               = optional(number, 1) # Number of buckets to create (appends -1, -2, etc. to name)
     acl                 = optional(string, "private")
     force_destroy       = optional(bool, false)
     object_lock_enabled = optional(bool, false)
