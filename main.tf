@@ -117,8 +117,8 @@ resource "scaleway_object_bucket" "this" {
 # ACL Types:
 # - private: Owner has full control (default, no ACL resource created)
 # - public-read: Anyone can read objects
-# - public-read-write: Anyone can read/write (use with caution)
 # - authenticated-read: Authenticated users can read
+# Note: public-read-write is blocked for security reasons
 # ==============================================================================
 
 resource "scaleway_object_bucket_acl" "this" {
@@ -176,6 +176,7 @@ resource "scaleway_object_bucket_website_configuration" "this" {
 resource "scaleway_object_bucket_lock_configuration" "this" {
   for_each = var.bucket_lock_configurations
 
+  # bucket_key must reference expanded key (e.g., "data-1" not "data")
   bucket     = scaleway_object_bucket.this[each.value.bucket_key].name
   region     = var.region
   project_id = data.scaleway_account_project.project.id
@@ -205,6 +206,7 @@ resource "scaleway_object_bucket_lock_configuration" "this" {
 resource "scaleway_object_bucket_policy" "this" {
   for_each = var.bucket_policies
 
+  # bucket_key must reference expanded key (e.g., "assets-1" not "assets")
   bucket     = scaleway_object_bucket.this[each.value.bucket_key].name
   region     = var.region
   project_id = data.scaleway_account_project.project.id
@@ -229,6 +231,7 @@ resource "scaleway_object_bucket_policy" "this" {
 resource "scaleway_object" "this" {
   for_each = var.objects
 
+  # bucket_key must reference expanded key (e.g., "website-1" not "website")
   bucket     = scaleway_object_bucket.this[each.value.bucket_key].name
   region     = var.region
   project_id = data.scaleway_account_project.project.id

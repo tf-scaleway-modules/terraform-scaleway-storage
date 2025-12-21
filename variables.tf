@@ -109,7 +109,8 @@ variable "buckets" {
     BUCKET CONFIGURATION OPTIONS:
     ─────────────────────────────
     name                : (Required) Globally unique bucket name
-    acl                 : Access control - private, public-read, public-read-write, authenticated-read
+    count               : Number of bucket instances to create (default: 1)
+    acl                 : Access control - private, public-read, authenticated-read (public-read-write blocked for security)
     force_destroy       : Allow deletion of non-empty bucket (default: false)
     object_lock_enabled : Enable WORM compliance - cannot be disabled once enabled
     versioning          : Keep multiple versions of objects
@@ -186,15 +187,15 @@ variable "buckets" {
 
   default = {}
 
-  # Validate ACL values
+  # Validate ACL values (public-read-write excluded for security)
   validation {
     condition = alltrue([
       for k, v in var.buckets : contains(
-        ["private", "public-read", "public-read-write", "authenticated-read"],
+        ["private", "public-read", "authenticated-read"],
         v.acl
       )
     ])
-    error_message = "ACL must be one of: private, public-read, public-read-write, authenticated-read."
+    error_message = "ACL must be one of: private, public-read, authenticated-read. Note: public-read-write is blocked for security reasons."
   }
 
   # Validate bucket naming conventions (S3-compatible)
@@ -230,6 +231,15 @@ variable "buckets" {
     ]))
     error_message = "CORS allowed_methods must be one of: GET, PUT, POST, DELETE, HEAD."
   }
+
+  # Validate count is at least 1
+  validation {
+    condition = alltrue([
+      for k, v in var.buckets : v.count >= 1
+    ])
+    error_message = "Bucket count must be at least 1."
+  }
+
 }
 
 # ==============================================================================
@@ -251,21 +261,29 @@ variable "bucket_policies" {
     bucket_key : Reference to bucket key in var.buckets
     policy     : JSON policy document (use jsonencode() for safety)
 
-    POLICY DOCUMENT FORMAT (AWS S3-compatible):
-    ───────────────────────────────────────────
+    POLICY DOCUMENT FORMAT (Scaleway S3-compatible):
+    ────────────────────────────────────────────────
     {
-      "Version": "2012-10-17",
+      "Version": "2023-04-17",
+      "Id": "MyPolicy",
       "Statement": [
         {
           "Sid": "UniqueStatementId",
-          "Effect": "Allow" | "Deny",
-          "Principal": "*" | { "SCW": ["user_id"] },
+          "Effect": "Allow",
+          "Principal": "*" | { "SCW": "user_id:<USER_ID>" },
           "Action": ["s3:GetObject", "s3:PutObject", ...],
-          "Resource": ["arn:scw:s3:::bucket-name/*"],
-          "Condition": { ... }  // Optional
+          "Resource": ["<bucket-name>/*"]
         }
       ]
     }
+
+    IMPORTANT NOTES:
+    ────────────────
+    - Use Version "2023-04-17" (Scaleway's current version, NOT AWS's "2012-10-17")
+    - Resource format is "<bucket-name>/*" (NOT "arn:scw:s3:::bucket-name/*")
+    - With 2023-04-17, only explicitly allowed actions are permitted (implicit deny)
+    - A policy with only Principal:"*" will block your Terraform user from managing the bucket
+    - Always include your user_id/application_id with full S3 permissions
 
     COMMON ACTIONS:
     ───────────────
