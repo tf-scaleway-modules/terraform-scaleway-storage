@@ -35,6 +35,7 @@ module "storage" {
     # Private bucket with versioning for data protection
     # ---------------------------------------------------------------------------
     data = {
+      count         = 10 # Creates data-1 ... data-10 with -N suffix on the bucket name
       name          = "${var.prefix}-data-${var.environment}"
       acl           = "private"
       versioning    = true
@@ -237,9 +238,10 @@ module "storage" {
       volume_key = "database-1" # Expanded key (count defaults to 1)
       tags       = ["backup", "database", var.environment]
 
-      # Export to Object Storage for offsite backup
+      # Export to Object Storage for offsite backup.
+      # data bucket has count=10 so the actual name is suffixed -1 ... -10.
       export = {
-        bucket = "${var.prefix}-data-${var.environment}" # Use data bucket
+        bucket = "${var.prefix}-data-${var.environment}-1"
         key    = "snapshots/database-backup.qcow2"
       }
     }
@@ -254,7 +256,7 @@ module "storage" {
 
       # Export each snapshot (key gets -1, -2 suffix automatically)
       export = {
-        bucket = "${var.prefix}-data-${var.environment}"
+        bucket = "${var.prefix}-data-${var.environment}-1"
         key    = "snapshots/app-backup.qcow2"
       }
     }
