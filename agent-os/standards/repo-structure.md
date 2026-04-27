@@ -10,7 +10,7 @@ Use this profile to bootstrap new projects or audit existing ones for compliance
 
 **File**: `.pre-commit-config.yaml`
 **Purpose**: Git hook framework that enforces code quality checks before commits reach the repository.
-**Tool version**: `pre-commit 4.3` (managed by mise)
+**Tool version**: `pre-commit 4.6` (managed by mise)
 
 ### Hook Types
 
@@ -40,7 +40,7 @@ All standard hook types are registered:
 | `check-merge-conflict` | Detect conflict markers | `--assume-in-merge` |
 | `end-of-file-fixer` | Ensure newline at EOF | Excludes `CHANGELOG.md` |
 
-**Terraform hooks** (`antonbabenko/pre-commit-terraform` v1.103.0):
+**Terraform hooks** (`antonbabenko/pre-commit-terraform` v1.105.0):
 
 | Hook | Purpose |
 |------|---------|
@@ -90,7 +90,7 @@ repos:
       exclude: ^CHANGELOG\.md$
 
 -   repo: https://github.com/antonbabenko/pre-commit-terraform.git
-    rev: v1.103.0
+    rev: v1.105.0
     hooks:
     - id: terraform_fmt
     - id: terraform_docs
@@ -138,15 +138,15 @@ auto_install = true
 
 | Tool | Version | Purpose |
 |------|---------|---------|
-| `pre-commit` | `4.3` | Git hooks framework |
-| `git-cliff` | `2.7.0` | Changelog generator |
-| `age` | `1.2` | Encryption tool |
-| `sops` | `3.11` | Secret management |
-| `shfmt` | `3.12` | Shell formatter |
-| `yamlfmt` | `0.20` | YAML formatter |
+| `pre-commit` | `4.6` | Git hooks framework |
+| `git-cliff` | `2.13.1` | Changelog generator |
+| `age` | `1.3` | Encryption tool |
+| `sops` | `3.12` | Secret management |
+| `shfmt` | `3.13` | Shell formatter |
+| `yamlfmt` | `0.21` | YAML formatter |
 | `opentofu` | `1.11` | Terraform-compatible IaC |
-| `terraform-docs` | `0.21.0` | Module documentation generator |
-| `tflint` | `0.56.0` | Terraform linter |
+| `terraform-docs` | `0.22.0` | Module documentation generator |
+| `tflint` | `0.62.0` | Terraform linter |
 | `python` | `3.13` | Required by pre-commit |
 
 ### Standard tasks
@@ -166,15 +166,15 @@ auto_install = true
 auto_install = true
 
 [tools]
-pre-commit = '4.3'
-git-cliff = '2.7.0'
-age = '1.2'
-sops = '3.11'
-shfmt = '3.12'
-yamlfmt = '0.20'
+pre-commit = '4.6'
+git-cliff = '2.13.1'
+age = '1.3'
+sops = '3.12'
+shfmt = '3.13'
+yamlfmt = '0.21'
 opentofu = '1.11'
-terraform-docs = '0.21.0'
-tflint = '0.56.0'
+terraform-docs = '0.22.0'
+tflint = '0.62.0'
 python = '3.13'
 
 [tasks.rm-cache]
@@ -414,7 +414,7 @@ rule "terraform_unused_required_providers" {
 
 **File**: `.cliff.toml`
 **Purpose**: Changelog generator configuration. Produces `CHANGELOG.md` from git history.
-**Tool version**: `git-cliff 2.7.0` (managed by mise)
+**Tool version**: `git-cliff 2.13.1` (managed by mise)
 
 ### Changelog format
 
@@ -579,8 +579,8 @@ include:
 | Variable | Value | Purpose |
 |----------|-------|---------|
 | `GIT_DEPTH` | `0` | Full git history for tag detection |
-| `MISE_VERSION` | `2024.12.14` | Mise installer version |
-| `OSV_SCANNER_VERSION` | `1.9.1` | Vulnerability scanner version |
+| `MISE_VERSION` | `2026.4.23` | Mise installer version |
+| `OSV_SCANNER_VERSION` | `2.3.5` | Vulnerability scanner version |
 
 **Stages**: `validate`, `release`
 
@@ -605,7 +605,7 @@ include:
 - **Runs**: `tofu init -backend=false`, `tofu validate`, `tofu fmt -check -recursive`
 
 **validate:tflint**:
-- **Image**: `ghcr.io/terraform-linters/tflint:v0.56.0`
+- **Image**: `ghcr.io/terraform-linters/tflint:v0.62.0`
 - **Runs**: `tflint --init`, `tflint --recursive`
 
 ### Changelog verification (`.gitlab/release.yml`)
