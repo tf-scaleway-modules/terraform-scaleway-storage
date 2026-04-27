@@ -52,6 +52,34 @@ run "expands_buckets_by_count" {
   }
 }
 
+run "count_10_creates_10_actual_bucket_resources" {
+  command = plan
+
+  variables {
+    buckets = {
+      data = {
+        name  = "acme-data"
+        count = 10
+      }
+    }
+  }
+
+  assert {
+    condition     = length(local.expanded_buckets) == 10
+    error_message = "count=10 should produce 10 entries in local.expanded_buckets"
+  }
+
+  assert {
+    condition     = length(scaleway_object_bucket.this) == 10
+    error_message = "count=10 should produce 10 actual scaleway_object_bucket resources"
+  }
+
+  assert {
+    condition     = scaleway_object_bucket.this["data-10"].name == "acme-data-10"
+    error_message = "10th bucket should exist with -10 suffix"
+  }
+}
+
 run "single_bucket_keeps_original_name" {
   command = plan
 
