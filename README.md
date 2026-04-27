@@ -53,7 +53,7 @@ Always reference buckets using expanded keys in outputs, objects, and policies.
 
 ### Prerequisites
 
-- Terraform >= 1.10.7 or OpenTofu >= 1.10
+- Terraform >= 1.11.0 or OpenTofu >= 1.11.0
 - Scaleway account with API credentials configured
 - Existing Scaleway project
 
@@ -495,15 +495,15 @@ terraform {
 ## Requirements
 
 | Name | Version |
-|------|---------|
-| <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.10.7 |
-| <a name="requirement_scaleway"></a> [scaleway](#requirement\_scaleway) | ~> 2.64 |
+| ---- | ------- |
+| <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.11.0 |
+| <a name="requirement_scaleway"></a> [scaleway](#requirement\_scaleway) | ~> 2.73 |
 
 ## Providers
 
 | Name | Version |
-|------|---------|
-| <a name="provider_scaleway"></a> [scaleway](#provider\_scaleway) | 2.65.1 |
+| ---- | ------- |
+| <a name="provider_scaleway"></a> [scaleway](#provider\_scaleway) | ~> 2.73 |
 
 ## Modules
 
@@ -512,7 +512,7 @@ No modules.
 ## Resources
 
 | Name | Type |
-|------|------|
+| ---- | ---- |
 | [scaleway_block_snapshot.imported](https://registry.terraform.io/providers/scaleway/scaleway/latest/docs/resources/block_snapshot) | resource |
 | [scaleway_block_snapshot.this](https://registry.terraform.io/providers/scaleway/scaleway/latest/docs/resources/block_snapshot) | resource |
 | [scaleway_block_volume.this](https://registry.terraform.io/providers/scaleway/scaleway/latest/docs/resources/block_volume) | resource |
@@ -527,7 +527,7 @@ No modules.
 ## Inputs
 
 | Name | Description | Type | Default | Required |
-|------|-------------|------|---------|:--------:|
+| ---- | ----------- | ---- | ------- | :------: |
 | <a name="input_block_snapshots"></a> [block\_snapshots](#input\_block\_snapshots) | Map of Block Storage snapshots to create.<br/><br/>Snapshots are point-in-time copies of Block Storage volumes.<br/>Use for backups, disaster recovery, or creating new volumes.<br/><br/>SNAPSHOT CONFIGURATION:<br/>───────────────────────<br/>name       : (Optional) Snapshot name, auto-generated if not provided<br/>count      : (Optional) Number of snapshot instances to create (default: 1)<br/>volume\_key : (Required if no import) Reference to expanded volume key (e.g., "database-1")<br/>zone       : (Optional) Availability Zone (defaults to volume's zone)<br/>tags       : (Optional) Tags for the snapshot<br/><br/>EXPORT TO OBJECT STORAGE:<br/>─────────────────────────<br/>Export snapshots as QCOW2 files to Object Storage for offsite backup.<br/>export = {<br/>  bucket = "my-backup-bucket"   # Bucket name (must exist)<br/>  key    = "snapshots/db.qcow2" # Object key/path<br/>}<br/><br/>IMPORT FROM OBJECT STORAGE:<br/>───────────────────────────<br/>Create snapshot from QCOW2 file in Object Storage (instead of volume).<br/>import = {<br/>  bucket = "my-backup-bucket"   # Bucket name<br/>  key    = "snapshots/db.qcow2" # Object key/path<br/>}<br/>Note: When using import, volume\_key is not required.<br/><br/>EXPANDED KEYS:<br/>──────────────<br/>When count > 1, snapshots are created with expanded keys:<br/>- count = 1 → snapshot-1<br/>- count = 3 → snapshot-1, snapshot-2, snapshot-3<br/><br/>USE CASES:<br/>──────────<br/>- Regular backups exported to Object Storage<br/>- Disaster recovery with offsite QCOW2 files<br/>- Cross-zone/region migration via Object Storage<br/>- Creating volumes from archived snapshots | <pre>map(object({<br/>    name       = optional(string)<br/>    count      = optional(number, 1)<br/>    volume_key = optional(string) # Required if no import block<br/>    zone       = optional(string)<br/>    tags       = optional(list(string), [])<br/><br/>    # Export snapshot to Object Storage as QCOW2<br/>    export = optional(object({<br/>      bucket = string # Bucket name to export to<br/>      key    = string # Object key/path (e.g., "backups/snapshot.qcow2")<br/>    }))<br/><br/>    # Import snapshot from Object Storage QCOW2 (alternative to volume_key)<br/>    import = optional(object({<br/>      bucket = string # Bucket name to import from<br/>      key    = string # Object key/path (e.g., "backups/snapshot.qcow2")<br/>    }))<br/>  }))</pre> | `{}` | no |
 | <a name="input_block_volumes"></a> [block\_volumes](#input\_block\_volumes) | Map of Block Storage volumes to create.<br/><br/>Block volumes are network-attached SSD storage that can be attached to<br/>Scaleway Instances. They persist independently of Instances and can be<br/>moved between Instances in the same Availability Zone.<br/><br/>VOLUME CONFIGURATION:<br/>─────────────────────<br/>name            : (Optional) Volume name, auto-generated if not provided<br/>count           : (Optional) Number of volume instances to create (default: 1)<br/>size\_in\_gb      : (Required) Volume size in GB (minimum 5 GB)<br/>iops            : (Required) IOPS performance tier - 5000 or 15000<br/>zone            : (Optional) Availability Zone (defaults to fr-par-1)<br/>snapshot\_id     : (Optional) Create volume from existing snapshot<br/>prevent\_destroy : (Optional) Prevent accidental deletion (default: false)<br/>tags            : (Optional) Tags for the volume<br/><br/>IOPS TIERS:<br/>───────────<br/>5000  : Standard performance, suitable for most workloads<br/>15000 : High performance, for databases and I/O intensive applications<br/>        Requires Instance with at least 3 GiB/s block bandwidth<br/><br/>EXPANDED KEYS:<br/>──────────────<br/>When count > 1, volumes are created with expanded keys:<br/>- count = 1 → volume-1<br/>- count = 3 → volume-1, volume-2, volume-3<br/><br/>IMPORTANT NOTES:<br/>────────────────<br/>- IOPS cannot be changed after volume creation<br/>- Volume must be in same zone as Instance to attach<br/>- Minimum size is 5 GB<br/>- Set prevent\_destroy = true in production to avoid accidental deletion | <pre>map(object({<br/>    name            = optional(string)<br/>    count           = optional(number, 1)<br/>    size_in_gb      = number<br/>    iops            = number<br/>    zone            = optional(string, "fr-par-1")<br/>    snapshot_id     = optional(string)<br/>    prevent_destroy = optional(bool, false)<br/>    tags            = optional(list(string), [])<br/>  }))</pre> | `{}` | no |
 | <a name="input_bucket_lock_configurations"></a> [bucket\_lock\_configurations](#input\_bucket\_lock\_configurations) | Map of object lock configurations for WORM compliance.<br/><br/>Object lock prevents object deletion or modification for a retention period.<br/>IMPORTANT: The bucket must have object\_lock\_enabled = true.<br/><br/>LOCK MODES:<br/>───────────<br/>GOVERNANCE  : Can be overridden by users with s3:BypassGovernanceRetention permission<br/>COMPLIANCE  : Cannot be overridden by anyone, including root account (irreversible!)<br/><br/>RETENTION PERIOD (specify exactly one):<br/>───────────────────────────────────────<br/>days  : Number of days to retain (1-36500)<br/>years : Number of years to retain (1-100)<br/><br/>WARNING: COMPLIANCE mode with long retention can make data permanently<br/>immutable. Test thoroughly in non-production environments first. | <pre>map(object({<br/>    bucket_key = string<br/>    rule = object({<br/>      default_retention = object({<br/>        mode  = string<br/>        days  = optional(number)<br/>        years = optional(number)<br/>      })<br/>    })<br/>  }))</pre> | `{}` | no |
@@ -542,7 +542,7 @@ No modules.
 ## Outputs
 
 | Name | Description |
-|------|-------------|
+| ---- | ----------- |
 | <a name="output_aws_cli_config"></a> [aws\_cli\_config](#output\_aws\_cli\_config) | AWS CLI configuration commands for connecting to Scaleway Object Storage.<br/><br/>Run these commands to configure the AWS CLI:<br/>aws configure set s3.endpoint\_url <s3\_endpoint><br/>aws configure set default.region <region> |
 | <a name="output_block_snapshot_exports"></a> [block\_snapshot\_exports](#output\_block\_snapshot\_exports) | Map of snapshots configured for export to Object Storage.<br/><br/>Each entry includes:<br/>- snapshot\_id: The snapshot ID<br/>- bucket: Destination bucket name<br/>- key: Object key/path for the QCOW2 file<br/>- url: Full S3 URL to the exported file |
 | <a name="output_block_snapshot_ids"></a> [block\_snapshot\_ids](#output\_block\_snapshot\_ids) | Map of expanded snapshot keys to their Scaleway resource IDs. |
@@ -565,6 +565,15 @@ No modules.
 | <a name="output_website_endpoints"></a> [website\_endpoints](#output\_website\_endpoints) | Map of bucket keys to their static website endpoints.<br/><br/>Only populated for buckets with website configuration.<br/>Format: https://<bucket-name>.s3-website.<region>.scw.cloud |
 | <a name="output_website_urls"></a> [website\_urls](#output\_website\_urls) | Simple map of bucket keys to website URLs (for buckets with website config). |
 <!-- END_TF_DOCS -->
+
+## Documentation
+
+| Document                         | Purpose                                                  |
+| -------------------------------- | -------------------------------------------------------- |
+| [README.md](./README.md)         | This file — overview, usage, configuration reference     |
+| [SECURITY.md](./SECURITY.md)     | Security guidance, production checklist, threat model    |
+| [TESTING.md](./TESTING.md)       | How to run the test suite, examples, and CI workflow     |
+| [CHANGELOG.md](./CHANGELOG.md)   | Release history (auto-generated by `git-cliff`)          |
 
 ## Bucket Configuration Reference
 

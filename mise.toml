@@ -2,15 +2,15 @@
 auto_install = true
 
 [tools]
-pre-commit = '4.3'
-git-cliff = '2.11.0'
-age = '1.2'
-sops = '3.11'
-shfmt = '3.12'
-yamlfmt = '0.20'
-opentofu = '1.11'
-terraform-docs = '0.21.0'
-tflint = '0.56.0'
+pre-commit = '4.6'
+git-cliff = '2.13.1'
+age = '1.3'
+sops = '3.12'
+shfmt = '3.13'
+yamlfmt = '0.21'
+opentofu = '1.11.6'
+terraform-docs = '0.22.0'
+tflint = '0.62.0'
 python = '3.13'
 
 [tasks.rm-cache]
