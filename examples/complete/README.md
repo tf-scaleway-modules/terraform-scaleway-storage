@@ -4,14 +4,16 @@ Exercises every feature of the module across both Object Storage and Block Stora
 
 ## What it creates
 
-### Object Storage (4 buckets)
+### Object Storage (13 buckets)
 
-| Key       | ACL           | Features                                                                       |
-| --------- | ------------- | ------------------------------------------------------------------------------ |
-| `data`    | private       | Versioning + multipart cleanup lifecycle rule                                  |
-| `assets`  | public-read   | CORS for browser access                                                        |
-| `logs`    | private       | Versioning + lifecycle (30d → GLACIER, 365d → expire)                          |
-| `website` | public-read   | Static website hosting + CORS, with `index.html`/`404.html`/`robots.txt` upload |
+| Key       | Count |  ACL          | Features                                                                       |
+| --------- | :---: | ------------- | ------------------------------------------------------------------------------ |
+| `data`    |  10   | private       | Versioning + multipart cleanup lifecycle rule (`data-1` … `data-10`)           |
+| `assets`  |   1   | public-read   | CORS for browser access                                                        |
+| `logs`    |   1   | private       | Versioning + lifecycle (30d → GLACIER, 365d → expire)                          |
+| `website` |   1   | public-read   | Static website hosting + CORS, with `index.html`/`404.html`/`robots.txt` upload |
+
+`count > 1` produces expanded keys `data-1` … `data-N` and suffixes the bucket name (`<prefix>-data-<env>-1` … `-10`). Snapshot exports target `data-1`.
 
 ### Block Storage (4 volumes, 3 snapshots)
 
