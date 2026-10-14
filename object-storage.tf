@@ -35,6 +35,9 @@ resource "scaleway_object_bucket" "this" {
       prefix  = lifecycle_rule.value.prefix
       enabled = lifecycle_rule.value.enabled
 
+      object_size_greater_than = lifecycle_rule.value.object_size_greater_than
+      object_size_less_than    = lifecycle_rule.value.object_size_less_than
+
       abort_incomplete_multipart_upload_days = try(
         lifecycle_rule.value.abort_incomplete_multipart_upload.days_after_initiation,
         null
@@ -43,7 +46,8 @@ resource "scaleway_object_bucket" "this" {
       dynamic "expiration" {
         for_each = lifecycle_rule.value.expiration != null ? [lifecycle_rule.value.expiration] : []
         content {
-          days = expiration.value.days
+          days                         = expiration.value.days
+          expired_object_delete_marker = expiration.value.expired_object_delete_marker
         }
       }
 
@@ -52,6 +56,23 @@ resource "scaleway_object_bucket" "this" {
         content {
           days          = transition.value.days
           storage_class = transition.value.storage_class
+        }
+      }
+
+      dynamic "noncurrent_version_expiration" {
+        for_each = lifecycle_rule.value.noncurrent_version_expiration != null ? [lifecycle_rule.value.noncurrent_version_expiration] : []
+        content {
+          noncurrent_days           = noncurrent_version_expiration.value.noncurrent_days
+          newer_noncurrent_versions = noncurrent_version_expiration.value.newer_noncurrent_versions
+        }
+      }
+
+      dynamic "noncurrent_version_transition" {
+        for_each = lifecycle_rule.value.noncurrent_version_transition
+        content {
+          noncurrent_days           = noncurrent_version_transition.value.noncurrent_days
+          storage_class             = noncurrent_version_transition.value.storage_class
+          newer_noncurrent_versions = noncurrent_version_transition.value.newer_noncurrent_versions
         }
       }
     }
@@ -91,6 +112,31 @@ resource "scaleway_object_bucket_acl" "this" {
   region     = var.region
   project_id = data.scaleway_account_project.project.id
   acl        = each.value.acl
+
+  depends_on = [scaleway_object_bucket.this]
+}
+
+# ==============================================================================
+# Default Server-Side Encryption
+# ------------------------------------------------------------------------------
+# SSE-S3 (AES256) or SSE-KMS (aws:kms with a Key Manager key) for new objects.
+# ==============================================================================
+
+resource "scaleway_object_bucket_server_side_encryption_configuration" "this" {
+  for_each = { for k, v in local.expanded_buckets : k => v if v.server_side_encryption != null }
+
+  bucket     = scaleway_object_bucket.this[each.key].name
+  region     = var.region
+  project_id = data.scaleway_account_project.project.id
+
+  rule {
+    bucket_key_enabled = each.value.server_side_encryption.bucket_key_enabled
+
+    apply_server_side_encryption_by_default {
+      sse_algorithm     = each.value.server_side_encryption.sse_algorithm
+      kms_master_key_id = each.value.server_side_encryption.kms_master_key_id
+    }
+  }
 
   depends_on = [scaleway_object_bucket.this]
 }
