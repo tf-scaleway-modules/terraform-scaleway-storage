@@ -116,6 +116,12 @@ variable "buckets" {
     versioning          : Keep multiple versions of objects
     tags                : Additional tags for this bucket
 
+    SERVER-SIDE ENCRYPTION (default encryption of new objects):
+    ───────────────────────────────────────────────────────────
+    sse_algorithm      : AES256 (default, SSE-S3) or aws:kms (SSE-KMS)
+    kms_master_key_id  : Key Manager key ID (required with aws:kms only)
+    bucket_key_enabled : Use bucket keys to reduce SSE-KMS calls
+
     CORS RULES (for web browser access):
     ────────────────────────────────────
     allowed_headers : Headers allowed in preflight requests (default: ["*"])
@@ -129,8 +135,11 @@ variable "buckets" {
     id         : Unique rule identifier
     enabled    : Whether rule is active (default: true)
     prefix     : Apply to objects with this prefix (empty = all)
-    expiration : Auto-delete after N days
+    expiration : Auto-delete after N days and/or remove expired delete markers
     transition : Move to storage class (GLACIER, ONEZONE_IA) after N days
+    noncurrent_version_expiration : Delete noncurrent versions (versioned buckets)
+    noncurrent_version_transition : Move noncurrent versions to a storage class
+    object_size_greater_than / object_size_less_than : Size filters (bytes)
     abort_incomplete_multipart_upload : Clean up failed uploads
 
     WEBSITE HOSTING:
@@ -149,6 +158,13 @@ variable "buckets" {
     versioning          = optional(bool, false)
     tags                = optional(map(string), {})
 
+    # Default server-side encryption (SSE-S3 or SSE-KMS)
+    server_side_encryption = optional(object({
+      sse_algorithm      = optional(string, "AES256")
+      kms_master_key_id  = optional(string)
+      bucket_key_enabled = optional(bool)
+    }), null)
+
     # CORS configuration for web access
     cors_rules = optional(list(object({
       allowed_headers = optional(list(string), ["*"])
@@ -164,13 +180,30 @@ variable "buckets" {
       enabled = optional(bool, true)
       prefix  = optional(string, "")
 
+      # Object size filters, in bytes
+      object_size_greater_than = optional(number)
+      object_size_less_than    = optional(number)
+
       expiration = optional(object({
-        days = number
+        days                         = optional(number)
+        expired_object_delete_marker = optional(bool)
       }), null)
 
       transition = optional(list(object({
         days          = number
         storage_class = string
+      })), [])
+
+      # Noncurrent object versions (versioned buckets)
+      noncurrent_version_expiration = optional(object({
+        noncurrent_days           = optional(number)
+        newer_noncurrent_versions = optional(number)
+      }), null)
+
+      noncurrent_version_transition = optional(list(object({
+        noncurrent_days           = number
+        storage_class             = string
+        newer_noncurrent_versions = optional(number)
       })), [])
 
       abort_incomplete_multipart_upload = optional(object({
@@ -211,12 +244,23 @@ variable "buckets" {
     condition = alltrue(flatten([
       for k, v in var.buckets : [
         for rule in v.lifecycle_rules : [
-          for transition in rule.transition :
-          contains(["GLACIER", "ONEZONE_IA", "STANDARD_IA"], transition.storage_class)
+          for storage_class in concat(rule.transition[*].storage_class, rule.noncurrent_version_transition[*].storage_class) :
+          contains(["GLACIER", "ONEZONE_IA", "STANDARD_IA"], storage_class)
         ]
       ]
     ]))
     error_message = "Storage class must be one of: GLACIER, ONEZONE_IA, STANDARD_IA."
+  }
+
+  # Validate server-side encryption
+  validation {
+    condition = alltrue([
+      for k, v in var.buckets : v.server_side_encryption == null || (
+        contains(["AES256", "aws:kms"], v.server_side_encryption.sse_algorithm) &&
+        (v.server_side_encryption.sse_algorithm == "aws:kms") == (v.server_side_encryption.kms_master_key_id != null)
+      )
+    ])
+    error_message = "server_side_encryption.sse_algorithm must be AES256 or aws:kms, and kms_master_key_id must be set with aws:kms only."
   }
 
   # Validate CORS methods

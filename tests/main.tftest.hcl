@@ -108,6 +108,44 @@ run "s3_endpoint_matches_region" {
   }
 }
 
+run "sse_and_noncurrent_lifecycle" {
+  command = plan
+
+  variables {
+    buckets = {
+      data = {
+        name                   = "acme-data"
+        versioning             = true
+        server_side_encryption = {}
+        lifecycle_rules = [{
+          id                            = "noncurrent"
+          expiration                    = { expired_object_delete_marker = true }
+          noncurrent_version_expiration = { noncurrent_days = 90 }
+          noncurrent_version_transition = [{ noncurrent_days = 30, storage_class = "GLACIER" }]
+        }]
+      }
+      logs = {
+        name = "acme-logs"
+      }
+    }
+  }
+
+  assert {
+    condition     = keys(scaleway_object_bucket_server_side_encryption_configuration.this) == ["data-1"]
+    error_message = "SSE configuration should only be created for buckets that set server_side_encryption"
+  }
+
+  assert {
+    condition     = one(one(scaleway_object_bucket_server_side_encryption_configuration.this["data-1"].rule).apply_server_side_encryption_by_default).sse_algorithm == "AES256"
+    error_message = "sse_algorithm should default to AES256"
+  }
+
+  assert {
+    condition     = scaleway_object_bucket.this["data-1"].lifecycle_rule[0].noncurrent_version_expiration[0].noncurrent_days == 90
+    error_message = "noncurrent_version_expiration should be passed to the bucket"
+  }
+}
+
 # ─── validation: rejects invalid inputs ────────────────────────────────────────
 
 run "rejects_invalid_organization_id" {
@@ -240,4 +278,19 @@ run "rejects_snapshot_export_without_qcow_extension" {
   }
 
   expect_failures = [var.block_snapshots]
+}
+
+run "rejects_kms_sse_without_key" {
+  command = plan
+
+  variables {
+    buckets = {
+      data = {
+        name                   = "acme-data"
+        server_side_encryption = { sse_algorithm = "aws:kms" }
+      }
+    }
+  }
+
+  expect_failures = [var.buckets]
 }
