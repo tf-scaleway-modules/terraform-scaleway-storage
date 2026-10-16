@@ -10,7 +10,11 @@ pre-commit:
     MISE_DATA_DIR: $CI_PROJECT_DIR/.cache/mise
     MISE_CACHE_DIR: $CI_PROJECT_DIR/.cache/mise/cache
   cache:
-    key: pre-commit-${CI_COMMIT_REF_SLUG}
+    key:
+      files:
+        - mise.toml
+        - .pre-commit-config.yaml
+      prefix: pre-commit
     paths:
       - $CI_PROJECT_DIR/.cache
   before_script:
@@ -37,6 +41,6 @@ pre-commit:
       if [ "${SKIP_OSV_SCAN:-false}" = "true" ]; then
         echo "Skipping OSV Scanner"
       else
-        osv-scanner -r .
+        osv-scanner --allow-no-lockfiles -r .
       fi
     - pre-commit run -a -v --show-diff-on-failure --color always
