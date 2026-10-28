@@ -31,11 +31,19 @@ Every bucket `count` MUST be at least 1.
 - **THEN** the plan is rejected with "Bucket count must be at least 1."
 
 ### Requirement: Bucket name validation
-Every bucket `name` MUST be 3-63 characters of lowercase letters, digits, dots and hyphens, starting and ending with a letter or digit. The check applies to the given name, before any count suffix.
+Every bucket `name` MUST be 3-63 characters of lowercase letters, digits, dots and hyphens, starting and ending with a letter or digit. When `count > 1`, the name with its `-<n>` suffix, for the largest n (`count`), MUST also be at most 63 characters.
 
 #### Scenario: Uppercase name
 - **WHEN** a bucket has `name = "Invalid_Bucket"`
 - **THEN** the plan is rejected with "Bucket name must be 3-63 characters, lowercase alphanumeric with hyphens and dots, start/end with alphanumeric."
+
+#### Scenario: Suffix overflows
+- **WHEN** a bucket has a 62-character name and `count = 2`
+- **THEN** the plan is rejected with "Bucket name plus the -<count> suffix must not exceed 63 characters when count > 1."
+
+#### Scenario: Suffix fits
+- **WHEN** a bucket has a 61-character name and `count = 2`
+- **THEN** the plan succeeds
 
 ### Requirement: ACL
 The `acl` of a bucket MUST be `private`, `public-read` or `authenticated-read`. A `scaleway_object_bucket_acl` SHALL be created only for buckets whose ACL is not `private`.

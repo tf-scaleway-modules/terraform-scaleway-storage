@@ -33,10 +33,9 @@ locals {
   expanded_block_volumes = merge([
     for key, volume in var.block_volumes : {
       for i in range(1, volume.count + 1) : "${key}-${i}" => merge(volume, {
-        name            = volume.name != null ? (volume.count > 1 ? "${volume.name}-${i}" : volume.name) : (volume.count > 1 ? "${key}-${i}-volume" : "${key}-volume")
-        volume_key      = key
-        index           = i
-        prevent_destroy = volume.prevent_destroy
+        name       = volume.name != null ? (volume.count > 1 ? "${volume.name}-${i}" : volume.name) : (volume.count > 1 ? "${key}-${i}-volume" : "${key}-volume")
+        volume_key = key
+        index      = i
       })
     }
   ]...)
@@ -58,7 +57,7 @@ locals {
         # For export, append index to key if count > 1 to avoid overwrites
         export = snapshot.export != null ? {
           bucket = snapshot.export.bucket
-          key    = snapshot.count > 1 ? replace(snapshot.export.key, "/(\\.qcow2?)$/", "-${i}$1") : snapshot.export.key
+          key    = snapshot.count > 1 ? replace(snapshot.export.key, "/(?i)(\\.qcow2?)$/", "-${i}$1") : snapshot.export.key
         } : null
         # Import stays the same (typically count=1 for imports)
         import = snapshot.import

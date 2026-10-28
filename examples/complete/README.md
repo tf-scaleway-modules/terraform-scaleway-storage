@@ -53,7 +53,7 @@ When `environment != "production"`, `force_destroy = true` so `terraform destroy
 | `organization_id` | Scaleway Organization ID (UUID)                              | required    |
 | `project_name`    | Scaleway project name                                        | required    |
 | `prefix`          | Prefix for resource names (must be globally unique)          | `example`   |
-| `environment`     | Environment label, also gates `force_destroy`/`prevent_destroy` | `dev`     |
+| `environment`     | Environment label, also gates `force_destroy` | `dev`     |
 
 ## Notable outputs
 

@@ -93,7 +93,7 @@ resource "scaleway_object_bucket" "this" {
   tags = merge(var.tags, each.value.tags)
 
   lifecycle {
-    # Set to true in production after initial deployment.
+    # Must stay a literal; false keeps destroy possible for every consumer.
     prevent_destroy = false
   }
 }

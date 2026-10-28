@@ -45,7 +45,7 @@ The `region` input (string) SHALL default to `fr-par` and MUST be one of `fr-par
 - **THEN** the plan is rejected with "Region must be one of: fr-par, nl-ams, pl-waw."
 
 ### Requirement: Global tags
-The `tags` input (`map(string)`, default `{}`) SHALL be merged with the per-bucket `tags` on every bucket, the per-bucket value winning on a shared key.
+The `tags` input (`map(string)`, default `{}`) SHALL be merged with the per-bucket `tags` on every bucket, the per-bucket value winning on a shared key. It does not apply to block volumes and snapshots, whose `tags` are lists of strings.
 
 #### Scenario: Tag merge
 - **WHEN** `tags` is `{ env = "prod" }` and a bucket sets `tags = { env = "dev", team = "a" }`
@@ -59,7 +59,7 @@ The inputs `buckets`, `bucket_policies`, `bucket_lock_configurations`, `objects`
 - **THEN** no bucket, object, volume or snapshot is planned and every map output is empty
 
 ### Requirement: Project and endpoint outputs
-The module SHALL output `project_id` (the looked-up project ID), `region` (the input) and `s3_endpoint` (`https://s3.<region>.scw.cloud`).
+The module SHALL output `project_id` (the looked-up project ID), `region` (the input, the region of the Object Storage resources) and `s3_endpoint` (`https://s3.<region>.scw.cloud`).
 
 #### Scenario: Paris endpoint
 - **WHEN** `region` is `fr-par`
