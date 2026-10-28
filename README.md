@@ -734,10 +734,13 @@ Use lowercase letters, numbers, hyphens, and dots. Start and end with alphanumer
 
 ## Contributing
 
+Changes are planned with [OpenSpec](https://github.com/Fission-AI/OpenSpec): `openspec/specs/` is the module's current contract and [AGENTS.md](AGENTS.md) routes to the engineering standards. Behaviour changes, new inputs, outputs or resources go through a change proposal (`/openspec-propose`) before any code.
+
 1. Fork the repository
-2. Create a feature branch
-3. Make your changes with tests
-4. Submit a merge request
+2. Run `mise run spec-setup` once per machine to register the standards stores
+3. Create a feature branch and, for a behaviour change, plan it with `/openspec-propose`
+4. Make your changes with tests, then run `pre-commit run -a`, `tofu test` and `mise run spec-validate`
+5. Submit a merge request
 
 ## License
 
