@@ -17,7 +17,7 @@ output "project_id" {
 }
 
 output "region" {
-  description = "Region where all buckets are deployed."
+  description = "Region of the Object Storage resources and endpoints (Block Storage uses zones)."
   value       = var.region
 }
 

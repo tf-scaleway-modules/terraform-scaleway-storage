@@ -190,12 +190,11 @@ module "storage" {
     # Creates: database-1
     # ---------------------------------------------------------------------------
     database = {
-      name            = "${var.prefix}-db-${var.environment}"
-      size_in_gb      = 100
-      iops            = 15000 # High performance tier
-      zone            = "fr-par-1"
-      prevent_destroy = var.environment == "production" # Document intent
-      tags            = ["database", var.environment]
+      name       = "${var.prefix}-db-${var.environment}"
+      size_in_gb = 100
+      iops       = 15000 # High performance tier
+      zone       = "fr-par-1"
+      tags       = ["database", var.environment]
     }
 
     # ---------------------------------------------------------------------------

@@ -78,7 +78,8 @@ variable "region" {
 
 variable "tags" {
   description = <<-EOT
-    Global tags applied to all resources.
+    Global tags merged into the tags of every bucket (bucket tags win on a shared key).
+    Block volumes and snapshots take their own list of strings and do not use them.
 
     Tags are key-value pairs for organizing and categorizing resources.
     Common uses:
@@ -239,6 +240,14 @@ variable "buckets" {
     error_message = "Bucket name must be 3-63 characters, lowercase alphanumeric with hyphens and dots, start/end with alphanumeric."
   }
 
+  # Validate the final name once the -<n> count suffix is added
+  validation {
+    condition = alltrue([
+      for k, v in var.buckets : v.count == 1 || length(v.name) + 1 + length(tostring(v.count)) <= 63
+    ])
+    error_message = "Bucket name plus the -<count> suffix must not exceed 63 characters when count > 1."
+  }
+
   # Validate storage class in transitions
   validation {
     condition = alltrue(flatten([
@@ -352,6 +361,14 @@ variable "bucket_policies" {
     ])
     error_message = "Bucket key must be a valid identifier (alphanumeric with underscores/hyphens, starting with letter)."
   }
+
+  # Validate bucket_key is an expanded key of var.buckets
+  validation {
+    condition = alltrue([
+      for k, v in var.bucket_policies : contains(flatten([for bk, b in var.buckets : [for i in range(1, b.count + 1) : "${bk}-${i}"]]), v.bucket_key)
+    ])
+    error_message = "bucket_key must be an expanded key of var.buckets (for example data-1)."
+  }
 }
 
 # ==============================================================================
@@ -421,6 +438,14 @@ variable "bucket_lock_configurations" {
       (v.rule.default_retention.years == null || (v.rule.default_retention.years >= 1 && v.rule.default_retention.years <= 100))
     ])
     error_message = "Retention days must be 1-36500, years must be 1-100."
+  }
+
+  # Validate bucket_key is an expanded key of var.buckets
+  validation {
+    condition = alltrue([
+      for k, v in var.bucket_lock_configurations : contains(flatten([for bk, b in var.buckets : [for i in range(1, b.count + 1) : "${bk}-${i}"]]), v.bucket_key)
+    ])
+    error_message = "bucket_key must be an expanded key of var.buckets (for example data-1)."
   }
 }
 
@@ -496,6 +521,14 @@ variable "objects" {
     ])
     error_message = "Object key must not start with '/', must be 1-1024 characters."
   }
+
+  # Validate bucket_key is an expanded key of var.buckets
+  validation {
+    condition = alltrue([
+      for k, v in var.objects : contains(flatten([for bk, b in var.buckets : [for i in range(1, b.count + 1) : "${bk}-${i}"]]), v.bucket_key)
+    ])
+    error_message = "bucket_key must be an expanded key of var.buckets (for example data-1)."
+  }
 }
 
 # ==============================================================================
@@ -519,10 +552,11 @@ variable "block_volumes" {
     count           : (Optional) Number of volume instances to create (default: 1)
     size_in_gb      : (Required) Volume size in GB (minimum 5 GB)
     iops            : (Required) IOPS performance tier - 5000 or 15000
-    zone            : (Optional) Availability Zone (defaults to fr-par-1)
+    zone            : (Optional) Availability Zone (defaults to fr-par-1 whatever var.region is)
     snapshot_id     : (Optional) Create volume from existing snapshot
-    prevent_destroy : (Optional) Prevent accidental deletion (default: false)
-    tags            : (Optional) Tags for the volume
+    prevent_destroy : (Optional) NOT ENFORCED: lifecycle.prevent_destroy must be a literal, so
+                      the module cannot honour it; setting it to true only raises a plan warning
+    tags            : (Optional) List of tags for the volume (not merged with var.tags)
 
     IOPS TIERS:
     ───────────
@@ -541,7 +575,7 @@ variable "block_volumes" {
     - IOPS cannot be changed after volume creation
     - Volume must be in same zone as Instance to attach
     - Minimum size is 5 GB
-    - Set prevent_destroy = true in production to avoid accidental deletion
+    - Protect production volumes with plan review and least-privilege credentials, not prevent_destroy
   EOT
 
   type = map(object({

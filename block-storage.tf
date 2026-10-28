@@ -11,9 +11,9 @@
 # IOPS cannot be changed after creation. Volume must share a zone with the
 # Instance to attach.
 #
-# NOTE: prevent_destroy in lifecycle{} cannot be dynamically set in Terraform,
-# so the per-volume prevent_destroy variable is documentation-of-intent only.
-# Set the literal in this block to true for production.
+# NOTE: prevent_destroy in lifecycle{} cannot reference variables, so the
+# per-volume prevent_destroy input is not enforced; the check below warns when
+# it is set to true. A literal true here would block every consumer's destroy.
 # ==============================================================================
 
 resource "scaleway_block_volume" "this" {
@@ -30,6 +30,13 @@ resource "scaleway_block_volume" "this" {
   lifecycle {
     # Terraform requires this to be a literal — see note above.
     prevent_destroy = false
+  }
+}
+
+check "block_volume_prevent_destroy_not_enforced" {
+  assert {
+    condition     = length([for k, v in var.block_volumes : k if v.prevent_destroy]) == 0
+    error_message = "prevent_destroy is not enforced (lifecycle.prevent_destroy cannot reference variables); volumes asking for it: ${join(", ", [for k, v in var.block_volumes : k if v.prevent_destroy])}. Review plans for unexpected destroys."
   }
 }
 
