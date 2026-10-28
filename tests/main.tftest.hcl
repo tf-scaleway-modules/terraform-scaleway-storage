@@ -15,6 +15,12 @@ mock_provider "scaleway" {
       id = "11111111-1111-1111-1111-111111111111"
     }
   }
+
+  mock_resource "scaleway_block_volume" {
+    defaults = {
+      id = "fr-par-1/22222222-2222-2222-2222-222222222222"
+    }
+  }
 }
 
 variables {
@@ -293,4 +299,174 @@ run "rejects_kms_sse_without_key" {
   }
 
   expect_failures = [var.buckets]
+}
+
+run "rejects_policy_with_unexpanded_bucket_key" {
+  command = plan
+
+  variables {
+    buckets = {
+      data = { name = "acme-data" }
+    }
+    bucket_policies = {
+      p = { bucket_key = "data", policy = "{}" } # expanded key is data-1
+    }
+  }
+
+  expect_failures = [var.bucket_policies]
+}
+
+run "rejects_lock_configuration_with_unknown_bucket_key" {
+  command = plan
+
+  variables {
+    buckets = {
+      data = { name = "acme-data", object_lock_enabled = true }
+    }
+    bucket_lock_configurations = {
+      legal = {
+        bucket_key = "data-2" # count is 1
+        rule       = { default_retention = { mode = "GOVERNANCE", days = 30 } }
+      }
+    }
+  }
+
+  expect_failures = [var.bucket_lock_configurations]
+}
+
+run "rejects_object_with_unknown_bucket_key" {
+  command = plan
+
+  variables {
+    buckets = {
+      data = { name = "acme-data" }
+    }
+    objects = {
+      hello = { bucket_key = "missing-1", key = "hello.txt", content = "hi" }
+    }
+  }
+
+  expect_failures = [var.objects]
+}
+
+run "accepts_expanded_bucket_keys" {
+  command = plan
+
+  variables {
+    buckets = {
+      data = { name = "acme-data", count = 2 }
+    }
+    bucket_policies = {
+      p = { bucket_key = "data-2", policy = "{}" }
+    }
+    objects = {
+      hello = { bucket_key = "data-1", key = "hello.txt", content = "hi" }
+    }
+  }
+
+  assert {
+    condition     = length(scaleway_object_bucket_policy.this) == 1 && length(scaleway_object.this) == 1
+    error_message = "expanded bucket keys should resolve to the policy and the object"
+  }
+}
+
+run "rejects_bucket_name_overflowing_with_count_suffix" {
+  command = plan
+
+  variables {
+    buckets = {
+      data = { name = "a23456789012345678901234567890123456789012345678901234567890bc", count = 2 } # 62 chars + "-2"
+    }
+  }
+
+  expect_failures = [var.buckets]
+}
+
+run "accepts_bucket_name_filling_63_chars_with_count_suffix" {
+  command = plan
+
+  variables {
+    buckets = {
+      data = { name = "a2345678901234567890123456789012345678901234567890123456789ab", count = 2 } # 61 chars + "-2"
+    }
+  }
+
+  assert {
+    condition     = length(scaleway_object_bucket.this["data-2"].name) == 63
+    error_message = "a 61-character name with a -2 suffix is 63 characters and must be accepted"
+  }
+}
+
+run "uppercase_export_extension_gets_count_suffix" {
+  command = plan
+
+  variables {
+    buckets = {
+      backups = { name = "acme-backups" }
+    }
+    block_volumes = {
+      db = { size_in_gb = 10, iops = 5000 }
+    }
+    block_snapshots = {
+      snap = {
+        volume_key = "db-1"
+        count      = 2
+        export     = { bucket = "acme-backups", key = "db.QCOW2" }
+      }
+    }
+  }
+
+  assert {
+    condition     = local.expanded_block_snapshots["snap-1"].export.key == "db-1.QCOW2" && local.expanded_block_snapshots["snap-2"].export.key == "db-2.QCOW2"
+    error_message = "uppercase extensions must receive the -<n> suffix so exports do not collide"
+  }
+}
+
+run "lowercase_export_extension_keeps_count_suffix" {
+  command = plan
+
+  variables {
+    block_volumes = {
+      db = { size_in_gb = 10, iops = 5000 }
+    }
+    block_snapshots = {
+      snap = {
+        volume_key = "db-1"
+        count      = 2
+        export     = { bucket = "acme-backups", key = "db.qcow2" }
+      }
+    }
+  }
+
+  assert {
+    condition     = local.expanded_block_snapshots["snap-2"].export.key == "db-2.qcow2"
+    error_message = "lowercase extension should still receive the -<n> suffix"
+  }
+}
+
+run "warns_when_prevent_destroy_requested" {
+  command = plan
+
+  variables {
+    block_volumes = {
+      db = { size_in_gb = 10, iops = 5000, prevent_destroy = true }
+    }
+  }
+
+  expect_failures = [check.block_volume_prevent_destroy_not_enforced]
+}
+
+run "no_prevent_destroy_warning_by_default" {
+  command = plan
+
+  variables {
+    block_volumes = {
+      db = { size_in_gb = 10, iops = 5000 }
+    }
+  }
+
+  assert {
+    condition     = length(scaleway_block_volume.this) == 1
+    error_message = "a volume without prevent_destroy plans normally and the check stays silent"
+  }
 }

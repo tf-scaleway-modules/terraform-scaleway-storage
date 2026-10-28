@@ -34,14 +34,14 @@ Security guidance for operators of this module. Read this before deploying to a 
 
 ## Block storage
 
-- `prevent_destroy` on the `lifecycle {}` block is currently `false` and Terraform requires it to be a literal — set it to `true` in `block-storage.tf` for production volumes you cannot afford to lose.
-- The `prevent_destroy` variable on each volume is intent-only documentation; it does not enforce anything.
+- `lifecycle.prevent_destroy` is `false` on every resource and Terraform requires it to be a literal, so the module cannot protect a volume from destruction. The `prevent_destroy` input of each volume is **not enforced**; setting it to `true` only raises a plan warning (`block_volume_prevent_destroy_not_enforced`).
+- Protect volumes you cannot afford to lose with plan review, a CI key without delete rights where your workflow allows it, and snapshots.
 - Snapshots exported as QCOW2 to Object Storage inherit the destination bucket's ACL and policy — make sure the destination bucket is private.
 
 ## Production checklist
 
 - [ ] `force_destroy = false` for every bucket
-- [ ] `prevent_destroy = true` (literal) in `block-storage.tf` for critical volumes
+- [ ] Critical volumes have recent snapshots and `plan` is reviewed for destroys (`prevent_destroy` is not enforced)
 - [ ] Versioning enabled for any bucket whose data must survive accidental deletion
 - [ ] Bucket policies include the Terraform-running principal with `s3:*`
 - [ ] `Principal: "*"` only on objects you intend to publish
