@@ -55,6 +55,16 @@ output "block_volume_names" {
   value       = module.storage.block_volume_names
 }
 
+output "database_volume_srn" {
+  description = "Database volume Scaleway Resource Name"
+  value       = module.storage.block_volumes["database-1"].srn
+}
+
+output "database_backup_srn" {
+  description = "Database snapshot Scaleway Resource Name"
+  value       = module.storage.block_snapshots["database_backup-1"].srn
+}
+
 output "database_volume_id" {
   description = "Database volume ID (for attaching to instances)"
   value       = module.storage.block_volume_ids["database-1"] # Expanded key

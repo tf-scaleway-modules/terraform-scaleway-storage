@@ -25,7 +25,7 @@ Exercises every feature of the module across both Object Storage and Block Stora
 
 | Snapshot key      | Count | Source         | Export                                          |
 | ----------------- | :---: | -------------- | ----------------------------------------------- |
-| `database_backup` |   1   | `database-1`   | `<prefix>-data-<env>/snapshots/database-backup.qcow2` |
+| `database_backup` |   1   | `database-1`   | `<prefix>-data-<env>/snapshots/database-backup.qcow2` (`timeouts.create = "30m"`) |
 | `app_backup`      |   2   | `app-1`        | `snapshots/app-backup-{1,2}.qcow2` (auto-suffixed)    |
 
 ## Usage
@@ -60,6 +60,7 @@ When `environment != "production"`, `force_destroy = true` so `terraform destroy
 - `bucket_endpoints` — S3 endpoint per bucket
 - `website_url` — Static website URL
 - `block_volumes` — Map of all volumes with expanded keys
+- `database_volume_srn`, `database_backup_srn` — Scaleway Resource Names of the database volume and its snapshot
 - `block_snapshot_exports` — QCOW2 URLs for offsite backups
 - `aws_cli_commands` — Ready-to-paste `aws configure` commands for Scaleway
 
