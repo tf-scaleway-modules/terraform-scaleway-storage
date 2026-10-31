@@ -171,11 +171,13 @@ module "storage" {
 
     # Upload robots.txt
     robots = {
-      bucket_key   = "website-1"
-      key          = "robots.txt"
-      content      = "User-agent: *\nAllow: /"
-      content_type = "text/plain"
-      visibility   = "public-read"
+      bucket_key    = "website-1"
+      key           = "robots.txt"
+      content       = "User-agent: *\nAllow: /"
+      content_type  = "text/plain"
+      visibility    = "public-read"
+      storage_class = "STANDARD"
+      metadata      = { owner = "web-team" } # Metadata keys must be lowercase
     }
   }
 
@@ -236,6 +238,9 @@ module "storage" {
       name       = "${var.prefix}-db-backup-${var.environment}"
       volume_key = "database-1" # Expanded key (count defaults to 1)
       tags       = ["backup", "database", var.environment]
+
+      # Large exports can outlast the provider's 5m default
+      timeouts = { create = "30m" }
 
       # Export to Object Storage for offsite backup.
       # data bucket has count=10 so the actual name is suffixed -1 ... -10.

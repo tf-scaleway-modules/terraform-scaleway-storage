@@ -224,12 +224,15 @@ resource "scaleway_object" "this" {
   region     = var.region
   project_id = data.scaleway_account_project.project.id
 
-  key          = each.value.key
-  file         = each.value.source
-  content      = each.value.content
-  content_type = each.value.content_type
-  visibility   = each.value.visibility
-  tags         = each.value.tags
+  key           = each.value.key
+  file          = each.value.source
+  content       = each.value.content
+  content_type  = each.value.content_type
+  visibility    = each.value.visibility
+  tags          = each.value.tags
+  hash          = each.value.hash
+  storage_class = each.value.storage_class
+  metadata      = each.value.metadata
 
   depends_on = [scaleway_object_bucket.this]
 }

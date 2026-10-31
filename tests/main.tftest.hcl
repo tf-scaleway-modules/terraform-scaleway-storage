@@ -286,6 +286,63 @@ run "rejects_snapshot_export_without_qcow_extension" {
   expect_failures = [var.block_snapshots]
 }
 
+run "rejects_malformed_snapshot_timeout" {
+  command = plan
+
+  variables {
+    block_snapshots = {
+      bad = {
+        volume_key = "db-1"
+        timeouts   = { create = "ten minutes" }
+      }
+    }
+  }
+
+  expect_failures = [var.block_snapshots]
+}
+
+run "rejects_object_storage_class_outside_provider_list" {
+  command = plan
+
+  variables {
+    objects = {
+      bad = { bucket_key = "data-1", key = "a.txt", content = "x", storage_class = "DEEP_ARCHIVE" }
+    }
+  }
+
+  expect_failures = [var.objects]
+}
+
+run "rejects_object_metadata_with_uppercase_key" {
+  command = plan
+
+  variables {
+    objects = {
+      bad = { bucket_key = "data-1", key = "a.txt", content = "x", metadata = { Owner = "backup" } }
+    }
+  }
+
+  expect_failures = [var.objects]
+}
+
+run "rejects_lifecycle_standard_ia" {
+  command = plan
+
+  variables {
+    buckets = {
+      data = {
+        name = "acme-data"
+        lifecycle_rules = [{
+          id         = "ia"
+          transition = [{ days = 30, storage_class = "STANDARD_IA" }]
+        }]
+      }
+    }
+  }
+
+  expect_failures = [var.buckets]
+}
+
 run "rejects_kms_sse_without_key" {
   command = plan
 
@@ -468,5 +525,95 @@ run "no_prevent_destroy_warning_by_default" {
   assert {
     condition     = length(scaleway_block_volume.this) == 1
     error_message = "a volume without prevent_destroy plans normally and the check stays silent"
+  }
+}
+
+run "snapshot_timeouts_reach_both_snapshot_resources" {
+  command = plan
+
+  variables {
+    block_volumes = {
+      db = { size_in_gb = 10, iops = 5000 }
+    }
+    block_snapshots = {
+      snap = {
+        volume_key = "db-1"
+        count      = 2
+        timeouts   = { create = "30m" }
+      }
+      restored = {
+        zone     = "fr-par-1"
+        import   = { bucket = "acme-backups", key = "db.qcow2" }
+        timeouts = { create = "1h30m", delete = "10m" }
+      }
+      plain = {
+        volume_key = "db-1"
+      }
+    }
+  }
+
+  assert {
+    condition     = scaleway_block_snapshot.this["snap-1"].timeouts.create == "30m" && scaleway_block_snapshot.this["snap-2"].timeouts.create == "30m"
+    error_message = "timeouts.create should be planned on every snapshot of the entry"
+  }
+
+  assert {
+    condition     = scaleway_block_snapshot.imported["restored-1"].timeouts.create == "1h30m" && scaleway_block_snapshot.imported["restored-1"].timeouts.delete == "10m"
+    error_message = "timeouts should be planned on imported snapshots"
+  }
+
+  assert {
+    condition     = scaleway_block_snapshot.this["plain-1"].timeouts == null
+    error_message = "a snapshot without timeouts should keep the provider defaults"
+  }
+}
+
+run "object_hash_storage_class_and_metadata_are_planned" {
+  command = plan
+
+  variables {
+    buckets = {
+      data = { name = "acme-data" }
+    }
+    objects = {
+      archive = {
+        bucket_key    = "data-1"
+        key           = "a.txt"
+        content       = "x"
+        hash          = "d41d8cd98f00b204e9800998ecf8427e"
+        storage_class = "GLACIER"
+        metadata      = { owner = "backup" }
+      }
+      plain = { bucket_key = "data-1", key = "b.txt", content = "y" }
+    }
+  }
+
+  assert {
+    condition     = scaleway_object.this["archive"].hash == "d41d8cd98f00b204e9800998ecf8427e" && scaleway_object.this["archive"].storage_class == "GLACIER" && scaleway_object.this["archive"].metadata["owner"] == "backup"
+    error_message = "hash, storage_class and metadata should be passed to the object"
+  }
+
+  assert {
+    condition     = scaleway_object.this["plain"].hash == null && scaleway_object.this["plain"].metadata == null
+    error_message = "unset hash and metadata should stay null"
+  }
+}
+
+run "block_outputs_expose_srn" {
+  command = apply
+
+  variables {
+    block_volumes = {
+      db = { size_in_gb = 10, iops = 5000 }
+    }
+    block_snapshots = {
+      snap     = { volume_key = "db-1" }
+      restored = { zone = "fr-par-1", import = { bucket = "acme-backups", key = "db.qcow2" } }
+    }
+  }
+
+  assert {
+    condition     = can(output.block_volumes["db-1"].srn) && can(output.block_snapshots["snap-1"].srn) && can(output.block_snapshots["restored-1"].srn)
+    error_message = "block_volumes and block_snapshots outputs should expose srn"
   }
 }

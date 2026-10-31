@@ -58,6 +58,7 @@ resource "scaleway_block_snapshot" "this" {
   zone       = each.value.zone != null ? each.value.zone : scaleway_block_volume.this[each.value.volume_key].zone
   project_id = data.scaleway_account_project.project.id
   tags       = each.value.tags
+  timeouts   = each.value.timeouts
 
   dynamic "export" {
     for_each = each.value.export != null ? [each.value.export] : []
@@ -86,6 +87,7 @@ resource "scaleway_block_snapshot" "imported" {
   zone       = each.value.zone != null ? each.value.zone : "${var.region}-1"
   project_id = data.scaleway_account_project.project.id
   tags       = each.value.tags
+  timeouts   = each.value.timeouts
 
   import {
     bucket = each.value.import.bucket

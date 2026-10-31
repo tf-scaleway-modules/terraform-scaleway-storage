@@ -102,11 +102,15 @@ Each entry of `lifecycle_rules` SHALL produce a lifecycle rule on the bucket, bu
 - **THEN** the rule carries both values
 
 ### Requirement: Lifecycle storage class validation
-Every `storage_class` in `transition` and `noncurrent_version_transition` MUST be `GLACIER`, `ONEZONE_IA` or `STANDARD_IA`.
+Every `storage_class` in `transition` and `noncurrent_version_transition` MUST be `STANDARD`, `GLACIER` or `ONEZONE_IA`, the classes the provider accepts.
 
 #### Scenario: Unsupported class
 - **WHEN** a transition sets `storage_class = "DEEP_ARCHIVE"`
-- **THEN** the plan is rejected with "Storage class must be one of: GLACIER, ONEZONE_IA, STANDARD_IA."
+- **THEN** the plan is rejected with "Storage class must be one of: STANDARD, GLACIER, ONEZONE_IA."
+
+#### Scenario: Class the provider rejects
+- **WHEN** a noncurrent version transition sets `storage_class = "STANDARD_IA"`
+- **THEN** the plan is rejected with the same message
 
 ### Requirement: CORS rules
 Each entry of `cors_rules` SHALL produce a CORS rule with `allowed_headers` (default `["*"]`), `allowed_methods`, `allowed_origins`, `expose_headers` (default `[]`) and `max_age_seconds` (default 3600). Every allowed method MUST be `GET`, `PUT`, `POST`, `DELETE` or `HEAD`.

@@ -242,6 +242,7 @@ output "block_volumes" {
 
     Each volume includes:
     - id: Volume ID (zoned format: zone/uuid)
+    - srn: Scaleway Resource Name
     - name: Volume name
     - size_in_gb: Volume size
     - iops: IOPS performance tier
@@ -252,6 +253,7 @@ output "block_volumes" {
   value = {
     for k, v in scaleway_block_volume.this : k => {
       id         = v.id
+      srn        = v.srn
       name       = v.name
       size_in_gb = v.size_in_gb
       iops       = v.iops
@@ -281,6 +283,7 @@ output "block_snapshots" {
 
     Each snapshot includes:
     - id: Snapshot ID
+    - srn: Scaleway Resource Name
     - name: Snapshot name
     - volume_id: Source volume ID (null for imported snapshots)
     - zone: Availability Zone
@@ -294,6 +297,7 @@ output "block_snapshots" {
     {
       for k, v in scaleway_block_snapshot.this : k => {
         id           = v.id
+        srn          = v.srn
         name         = v.name
         volume_id    = v.volume_id
         zone         = v.zone
@@ -307,6 +311,7 @@ output "block_snapshots" {
     {
       for k, v in scaleway_block_snapshot.imported : k => {
         id           = v.id
+        srn          = v.srn
         name         = v.name
         volume_id    = null
         zone         = v.zone

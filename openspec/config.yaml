@@ -33,7 +33,7 @@ context: |
   (?ref=vX.Y.Z). Apache-2.0.
 
   Stack: HCL only. required_version >= 1.11.0 (OpenTofu 1.11+). Provider
-  pinned with ~> in versions.tf: scaleway/scaleway ~> 2.86. Every tool is
+  pinned with ~> in versions.tf: scaleway/scaleway ~> 2.89. Every tool is
   pinned in mise.toml.
 
   Layout: main.tf is the header listing the themed files; object-storage.tf

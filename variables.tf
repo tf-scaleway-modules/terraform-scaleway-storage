@@ -137,7 +137,7 @@ variable "buckets" {
     enabled    : Whether rule is active (default: true)
     prefix     : Apply to objects with this prefix (empty = all)
     expiration : Auto-delete after N days and/or remove expired delete markers
-    transition : Move to storage class (GLACIER, ONEZONE_IA) after N days
+    transition : Move to storage class (STANDARD, GLACIER, ONEZONE_IA) after N days
     noncurrent_version_expiration : Delete noncurrent versions (versioned buckets)
     noncurrent_version_transition : Move noncurrent versions to a storage class
     object_size_greater_than / object_size_less_than : Size filters (bytes)
@@ -254,11 +254,11 @@ variable "buckets" {
       for k, v in var.buckets : [
         for rule in v.lifecycle_rules : [
           for storage_class in concat(rule.transition[*].storage_class, rule.noncurrent_version_transition[*].storage_class) :
-          contains(["GLACIER", "ONEZONE_IA", "STANDARD_IA"], storage_class)
+          contains(["STANDARD", "GLACIER", "ONEZONE_IA"], storage_class)
         ]
       ]
     ]))
-    error_message = "Storage class must be one of: GLACIER, ONEZONE_IA, STANDARD_IA."
+    error_message = "Storage class must be one of: STANDARD, GLACIER, ONEZONE_IA."
   }
 
   # Validate server-side encryption
@@ -472,6 +472,10 @@ variable "objects" {
     content_type : MIME type (auto-detected if not specified)
     visibility   : private (default) or public-read
     tags         : Object-level tags
+    hash         : (Optional) Triggers a re-upload when it changes; use filemd5(path)
+                   with source so a modified file is uploaded again
+    storage_class: (Optional) STANDARD, GLACIER or ONEZONE_IA (provider default if unset)
+    metadata     : (Optional) Map of object metadata; keys must be lowercase
 
     COMMON MIME TYPES:
     ──────────────────
@@ -484,13 +488,16 @@ variable "objects" {
   EOT
 
   type = map(object({
-    bucket_key   = string
-    key          = string
-    source       = optional(string)
-    content      = optional(string)
-    content_type = optional(string)
-    visibility   = optional(string, "private")
-    tags         = optional(map(string), {})
+    bucket_key    = string
+    key           = string
+    source        = optional(string)
+    content       = optional(string)
+    content_type  = optional(string)
+    visibility    = optional(string, "private")
+    tags          = optional(map(string), {})
+    hash          = optional(string)
+    storage_class = optional(string)
+    metadata      = optional(map(string))
   }))
 
   default = {}
@@ -520,6 +527,24 @@ variable "objects" {
       !startswith(v.key, "/") && length(v.key) > 0 && length(v.key) <= 1024
     ])
     error_message = "Object key must not start with '/', must be 1-1024 characters."
+  }
+
+  # Validate storage class when set
+  validation {
+    condition = alltrue([
+      for k, v in var.objects :
+      v.storage_class == null || contains(["STANDARD", "GLACIER", "ONEZONE_IA"], v.storage_class)
+    ])
+    error_message = "Object storage_class must be one of: STANDARD, GLACIER, ONEZONE_IA."
+  }
+
+  # Validate metadata keys (the provider requires lowercase keys)
+  validation {
+    condition = alltrue([
+      for k, v in var.objects :
+      v.metadata == null || alltrue([for mk in keys(v.metadata) : mk == lower(mk)])
+    ])
+    error_message = "Object metadata keys must be lowercase."
   }
 
   # Validate bucket_key is an expanded key of var.buckets
@@ -644,6 +669,8 @@ variable "block_snapshots" {
     volume_key : (Required if no import) Reference to expanded volume key (e.g., "database-1")
     zone       : (Optional) Availability Zone (defaults to volume's zone)
     tags       : (Optional) Tags for the snapshot
+    timeouts   : (Optional) create/read/update/delete durations such as "30m" or "1h30m"
+                 (provider default 5m each); raise create for large exports and imports
 
     EXPORT TO OBJECT STORAGE:
     ─────────────────────────
@@ -682,6 +709,14 @@ variable "block_snapshots" {
     volume_key = optional(string) # Required if no import block
     zone       = optional(string)
     tags       = optional(list(string), [])
+
+    # Operation timeouts, applied to every snapshot of the entry
+    timeouts = optional(object({
+      create = optional(string)
+      read   = optional(string)
+      update = optional(string)
+      delete = optional(string)
+    }))
 
     # Export snapshot to Object Storage as QCOW2
     export = optional(object({
@@ -722,6 +757,17 @@ variable "block_snapshots" {
       for k, v in var.block_snapshots : v.count >= 1
     ])
     error_message = "Block snapshot count must be at least 1."
+  }
+
+  # Validate timeouts are Go durations
+  validation {
+    condition = alltrue([
+      for k, v in var.block_snapshots :
+      v.timeouts == null || alltrue([
+        for t in values(v.timeouts) : t == null || can(regex("^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$", t))
+      ])
+    ])
+    error_message = "Snapshot timeouts must be durations such as 10m or 1h30m (units ns, us, ms, s, m, h)."
   }
 
   # Validate export key ends with .qcow or .qcow2
