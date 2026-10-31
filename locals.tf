@@ -7,6 +7,15 @@
 
 locals {
   # ===========================================================================
+  # Block Storage Tags
+  # ---------------------------------------------------------------------------
+  # Volumes and snapshots take lists of strings, so the global map is rendered
+  # as "key:value" (map iteration is key-ordered, so the list is stable).
+  # ===========================================================================
+
+  block_tags = [for k, v in var.tags : "${k}:${v}"]
+
+  # ===========================================================================
   # Bucket Expansion
   # ---------------------------------------------------------------------------
   # Expands bucket configurations based on count parameter.
@@ -23,6 +32,12 @@ locals {
     }
   ]...)
 
+  # Default retention per expanded bucket key, for buckets that set one.
+  bucket_retentions = {
+    for k, b in local.expanded_buckets : k => b.object_lock.default_retention
+    if b.object_lock == null ? false : b.object_lock.default_retention != null
+  }
+
   # ===========================================================================
   # Block Volume Expansion
   # ---------------------------------------------------------------------------
@@ -36,6 +51,8 @@ locals {
         name       = volume.name != null ? (volume.count > 1 ? "${volume.name}-${i}" : volume.name) : (volume.count > 1 ? "${key}-${i}-volume" : "${key}-volume")
         volume_key = key
         index      = i
+        zone       = volume.zone != null ? volume.zone : var.zone
+        tags       = distinct(concat(volume.tags, local.block_tags))
       })
     }
   ]...)
@@ -54,6 +71,7 @@ locals {
         name         = snapshot.name != null ? (snapshot.count > 1 ? "${snapshot.name}-${i}" : snapshot.name) : (snapshot.count > 1 ? "${key}-${i}-snapshot" : "${key}-snapshot")
         snapshot_key = key
         index        = i
+        tags         = distinct(concat(snapshot.tags, local.block_tags))
         # For export, append index to key if count > 1 to avoid overwrites
         export = snapshot.export != null ? {
           bucket = snapshot.export.bucket
@@ -64,14 +82,4 @@ locals {
       })
     }
   ]...)
-
-  # ===========================================================================
-  # S3 Endpoints
-  # ---------------------------------------------------------------------------
-  # Scaleway Object Storage uses S3-compatible endpoints.
-  # Format: https://s3.<region>.scw.cloud
-  # ===========================================================================
-
-  s3_endpoint = "https://s3.${var.region}.scw.cloud"
-
 }

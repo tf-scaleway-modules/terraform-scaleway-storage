@@ -6,7 +6,7 @@ This module ships with a hermetic test suite using Terraform's native `.tftest.h
 
 | File                    | What it covers                                                                          |
 | ----------------------- | --------------------------------------------------------------------------------------- |
-| `tests/main.tftest.hcl` | Variable validations, count expansion in `locals.tf`, derived `s3_endpoint`             |
+| `tests/main.tftest.hcl` | Variable validations, count expansion in `locals.tf`, project/region/zone, tags, object lock, outputs |
 | `examples/minimal/`     | Smoke test: a single bucket configuration validates and plans cleanly                   |
 | `examples/complete/`    | Integration target: every feature wired together (Object + Block storage)               |
 
@@ -57,8 +57,7 @@ terraform validate
 ```bash
 export SCW_ACCESS_KEY=...
 export SCW_SECRET_KEY=...
-export TF_VAR_organization_id=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-export TF_VAR_project_name=test-project
+export TF_VAR_project_id=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx   # optional
 
 cd examples/complete
 terraform init
@@ -103,14 +102,13 @@ Tests should be plan-only and use mocks unless they're explicitly integration te
 
 ```hcl
 mock_provider "scaleway" {
-  mock_data "scaleway_account_project" {
-    defaults = { id = "11111111-1111-1111-1111-111111111111" }
+  # Computed values asserted in outputs need a mock default
+  mock_resource "scaleway_object_bucket" {
+    defaults = {
+      endpoint     = "https://acme.s3.fr-par.scw.cloud"
+      api_endpoint = "https://s3.fr-par.scw.cloud"
+    }
   }
-}
-
-variables {
-  organization_id = "11111111-1111-1111-1111-111111111111"
-  project_name    = "test-project"
 }
 
 run "my_new_check" {
