@@ -10,10 +10,6 @@
 # ------------------------------------------------------------------------------
 # IOPS cannot be changed after creation. Volume must share a zone with the
 # Instance to attach.
-#
-# NOTE: prevent_destroy in lifecycle{} cannot reference variables, so the
-# per-volume prevent_destroy input is not enforced; the check below warns when
-# it is set to true. A literal true here would block every consumer's destroy.
 # ==============================================================================
 
 resource "scaleway_block_volume" "this" {
@@ -23,21 +19,9 @@ resource "scaleway_block_volume" "this" {
   iops        = each.value.iops
   size_in_gb  = each.value.size_in_gb
   zone        = each.value.zone
-  project_id  = data.scaleway_account_project.project.id
+  project_id  = var.project_id
   snapshot_id = each.value.snapshot_id
   tags        = each.value.tags
-
-  lifecycle {
-    # Terraform requires this to be a literal — see note above.
-    prevent_destroy = false
-  }
-}
-
-check "block_volume_prevent_destroy_not_enforced" {
-  assert {
-    condition     = length([for k, v in var.block_volumes : k if v.prevent_destroy]) == 0
-    error_message = "prevent_destroy is not enforced (lifecycle.prevent_destroy cannot reference variables); volumes asking for it: ${join(", ", [for k, v in var.block_volumes : k if v.prevent_destroy])}. Review plans for unexpected destroys."
-  }
 }
 
 # ==============================================================================
@@ -56,7 +40,7 @@ resource "scaleway_block_snapshot" "this" {
   name       = each.value.name
   volume_id  = scaleway_block_volume.this[each.value.volume_key].id
   zone       = each.value.zone != null ? each.value.zone : scaleway_block_volume.this[each.value.volume_key].zone
-  project_id = data.scaleway_account_project.project.id
+  project_id = var.project_id
   tags       = each.value.tags
   timeouts   = each.value.timeouts
 
@@ -67,8 +51,6 @@ resource "scaleway_block_snapshot" "this" {
       key    = export.value.key
     }
   }
-
-  depends_on = [scaleway_block_volume.this]
 }
 
 # ==============================================================================
@@ -84,8 +66,8 @@ resource "scaleway_block_snapshot" "imported" {
   }
 
   name       = each.value.name
-  zone       = each.value.zone != null ? each.value.zone : "${var.region}-1"
-  project_id = data.scaleway_account_project.project.id
+  zone       = each.value.zone != null ? each.value.zone : var.zone
+  project_id = var.project_id
   tags       = each.value.tags
   timeouts   = each.value.timeouts
 

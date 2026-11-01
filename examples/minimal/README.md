@@ -2,7 +2,7 @@
 
 Smallest viable use of the module: a single private Object Storage bucket in `fr-par`, all other settings default.
 
-Use this as a starting point when you only need a bucket and want to validate the module wiring (auth, project lookup, naming) before layering on lifecycle, website, or block storage configuration.
+Use this as a starting point when you only need a bucket and want to validate the module wiring (auth, project, naming) before layering on lifecycle, website, or block storage configuration.
 
 ## What it creates
 
@@ -14,8 +14,7 @@ Use this as a starting point when you only need a bucket and want to validate th
 export SCW_ACCESS_KEY=...
 export SCW_SECRET_KEY=...
 
-export TF_VAR_organization_id=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-export TF_VAR_project_name=my-project
+export TF_VAR_project_id=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx   # optional: omit for the provider default project
 
 terraform init
 terraform plan
@@ -28,8 +27,7 @@ terraform apply
 
 | Name              | Description                                                       | Required |
 | ----------------- | ----------------------------------------------------------------- | :------: |
-| `organization_id` | Scaleway Organization ID (UUID)                                   |   yes    |
-| `project_name`    | Scaleway project where the bucket is created                      |   yes    |
+| `project_id`      | Scaleway project ID (UUID); `null` uses the provider default      |    no    |
 | `prefix`          | Prefix for the bucket name (default: `example`)                   |    no    |
 
 ## Outputs
@@ -37,9 +35,8 @@ terraform apply
 | Name              | Description                                                       |
 | ----------------- | ----------------------------------------------------------------- |
 | `bucket_name`     | The created bucket name                                           |
-| `bucket_endpoint` | S3 endpoint for the bucket                                        |
+| `bucket_endpoint` | S3 endpoint for the bucket, as reported by the provider           |
 | `s3_endpoint`     | Region-level S3 API endpoint for CLI/SDK use                      |
-| `bucket_arn`      | ARN-style identifier for use in bucket policies                   |
 
 ## Cleanup
 

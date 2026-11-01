@@ -80,3 +80,14 @@ When set, every object `metadata` key MUST be lowercase.
 #### Scenario: Uppercase key
 - **WHEN** an entry sets `metadata = { Owner = "backup" }`
 - **THEN** the plan is rejected with "Object metadata keys must be lowercase."
+
+### Requirement: Object tags
+Each object SHALL carry the merge of the global `tags` and its own `tags`, the object value winning on a shared key.
+
+#### Scenario: Global tag reaches an object
+- **WHEN** `tags = { env = "prod" }` and an object sets `tags = { kind = "page" }`
+- **THEN** the object has `env = "prod"` and `kind = "page"`
+
+#### Scenario: No tags
+- **WHEN** neither the global `tags` nor the object sets a tag
+- **THEN** the object sets no tags and a second plan is empty

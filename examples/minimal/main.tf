@@ -12,12 +12,9 @@
 module "storage" {
   source = "../../"
 
-  # Required: Scaleway organization and project
-  organization_id = var.organization_id
-  project_name    = var.project_name
-
-  # Optional: Override default region (fr-par)
-  region = "fr-par"
+  # Optional: null keeps the provider's default project and region
+  project_id = var.project_id
+  region     = "fr-par"
 
   # Create a single private bucket
   buckets = {
@@ -35,14 +32,10 @@ module "storage" {
 # Variables
 # ==============================================================================
 
-variable "organization_id" {
-  description = "Scaleway Organization ID (UUID format)"
+variable "project_id" {
+  description = "Scaleway Project ID (UUID) where resources are created; null uses the provider default project"
   type        = string
-}
-
-variable "project_name" {
-  description = "Scaleway Project name where resources will be created"
-  type        = string
+  default     = null
 }
 
 variable "prefix" {

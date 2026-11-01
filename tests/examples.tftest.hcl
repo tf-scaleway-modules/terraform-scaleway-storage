@@ -6,9 +6,6 @@
 # ╚══════════════════════════════════════════════════════════════════════════════╝
 
 mock_provider "scaleway" {
-  mock_data "scaleway_account_project" {
-    defaults = { id = "11111111-1111-1111-1111-111111111111" }
-  }
   # The Scaleway provider client-side validates that volume_id is a UUID.
   # Mocks return random strings by default, so pin id/zone to plausible values.
   mock_resource "scaleway_block_volume" {
@@ -16,11 +13,6 @@ mock_provider "scaleway" {
       id = "22222222-2222-2222-2222-222222222222"
     }
   }
-}
-
-variables {
-  organization_id = "11111111-1111-1111-1111-111111111111"
-  project_name    = "test-project"
 }
 
 # ─── examples/minimal — single private bucket ──────────────────────────────────
@@ -57,6 +49,7 @@ run "complete_example_resource_topology" {
 
   variables {
     region = "fr-par"
+    zone   = "fr-par-1"
     tags = {
       environment = "dev"
       managed-by  = "terraform"
@@ -100,8 +93,19 @@ run "complete_example_resource_topology" {
           prefix     = "app/"
           transition = [{ days = 30, storage_class = "GLACIER" }]
           expiration = { days = 365 }
+          },
+          {
+            id         = "expire-temp"
+            enabled    = true
+            tags       = { tier = "temp" }
+            expiration = { days = 7 }
         }]
         tags = { type = "logs", retention = "1year" }
+      }
+      audit = {
+        name        = "example-audit-dev"
+        object_lock = { default_retention = { mode = "GOVERNANCE", days = 1 } }
+        tags        = { type = "audit" }
       }
       website = {
         name          = "example-website-dev"
@@ -147,7 +151,6 @@ run "complete_example_resource_topology" {
         name       = "example-db-dev"
         size_in_gb = 100
         iops       = 15000
-        zone       = "fr-par-1"
         tags       = ["database", "dev"]
       }
       app = {
@@ -155,15 +158,20 @@ run "complete_example_resource_topology" {
         count      = 2
         size_in_gb = 50
         iops       = 5000
-        zone       = "fr-par-1"
         tags       = ["application", "dev"]
       }
       logs = {
         name       = "example-logs-vol-dev"
         size_in_gb = 20
         iops       = 5000
-        zone       = "fr-par-1"
+        zone       = "fr-par-2"
         tags       = ["logs", "dev"]
+      }
+      restored = {
+        name        = "example-restored-dev"
+        iops        = 5000
+        snapshot_id = "fr-par-1/33333333-3333-3333-3333-333333333333"
+        tags        = ["restored", "dev"]
       }
     }
 
@@ -191,8 +199,8 @@ run "complete_example_resource_topology" {
 
   # ─── bucket count + named expanded keys ─────────────────────────────────────
   assert {
-    condition     = length(scaleway_object_bucket.this) == 13 # 10 data + 1 assets + 1 logs + 1 website
-    error_message = "complete example should plan 13 buckets total (10 data + 1 assets + 1 logs + 1 website)"
+    condition     = length(scaleway_object_bucket.this) == 14 # 10 data + 1 assets + 1 logs + 1 audit + 1 website
+    error_message = "complete example should plan 14 buckets total (10 data + 1 assets + 1 logs + 1 audit + 1 website)"
   }
 
   assert {
@@ -201,6 +209,7 @@ run "complete_example_resource_topology" {
       contains(keys(scaleway_object_bucket.this), "data-10"),
       contains(keys(scaleway_object_bucket.this), "assets-1"),
       contains(keys(scaleway_object_bucket.this), "logs-1"),
+      contains(keys(scaleway_object_bucket.this), "audit-1"),
       contains(keys(scaleway_object_bucket.this), "website-1"),
     ])
     error_message = "all bucket keys referenced by examples/complete/outputs.tf must exist"
@@ -225,7 +234,7 @@ run "complete_example_resource_topology" {
 
   assert {
     condition     = contains(keys(scaleway_object_bucket_website_configuration.this), "website-1")
-    error_message = "website config must be keyed website-1 (matches website_urls[\"website-1\"] in outputs)"
+    error_message = "website config must be keyed website-1 (matches buckets[\"website-1\"].website_endpoint in outputs)"
   }
 
   # ─── objects reference an existing bucket_key ──────────────────────────────
@@ -236,8 +245,8 @@ run "complete_example_resource_topology" {
 
   # ─── block volumes ──────────────────────────────────────────────────────────
   assert {
-    condition     = length(scaleway_block_volume.this) == 4 # database-1 + app-1 + app-2 + logs-1
-    error_message = "complete example should plan 4 block volumes (1 database + 2 app + 1 logs)"
+    condition     = length(scaleway_block_volume.this) == 5 # database-1 + app-1 + app-2 + logs-1 + restored-1
+    error_message = "complete example should plan 5 block volumes (1 database + 2 app + 1 logs + 1 restored)"
   }
 
   assert {
@@ -246,6 +255,7 @@ run "complete_example_resource_topology" {
       contains(keys(scaleway_block_volume.this), "app-1"),
       contains(keys(scaleway_block_volume.this), "app-2"),
       contains(keys(scaleway_block_volume.this), "logs-1"),
+      contains(keys(scaleway_block_volume.this), "restored-1"),
     ])
     error_message = "all volume keys referenced by examples/complete/outputs.tf must exist"
   }
@@ -254,5 +264,45 @@ run "complete_example_resource_topology" {
   assert {
     condition     = length(scaleway_block_snapshot.this) == 3 # database_backup-1 + app_backup-1 + app_backup-2
     error_message = "complete example should plan 3 block snapshots"
+  }
+}
+
+run "complete_example_new_features" {
+  command = plan
+
+  variables {
+    zone = "fr-par-1"
+    tags = { environment = "dev" }
+
+    buckets = {
+      audit = {
+        name        = "example-audit-dev"
+        object_lock = { default_retention = { mode = "GOVERNANCE", days = 1 } }
+      }
+    }
+
+    block_volumes = {
+      logs = { size_in_gb = 20, iops = 5000, zone = "fr-par-2", tags = ["logs"] }
+      restored = {
+        iops        = 5000
+        snapshot_id = "fr-par-1/33333333-3333-3333-3333-333333333333"
+        tags        = ["restored", "environment:dev"]
+      }
+    }
+  }
+
+  assert {
+    condition     = scaleway_object_bucket_lock_configuration.this["audit-1"].rule[0].default_retention[0].days == 1 && scaleway_object_bucket.this["audit-1"].versioning[0].enabled
+    error_message = "the audit bucket should carry a 1 day retention and forced versioning"
+  }
+
+  assert {
+    condition     = scaleway_block_volume.this["logs-1"].zone == "fr-par-2" && scaleway_block_volume.this["restored-1"].zone == "fr-par-1"
+    error_message = "the logs volume zone wins over the module zone, the restored volume follows it"
+  }
+
+  assert {
+    condition     = scaleway_block_volume.this["restored-1"].tags == tolist(["restored", "environment:dev"]) && scaleway_block_volume.this["logs-1"].tags == tolist(["logs", "environment:dev"])
+    error_message = "global tags should reach the volumes as key:value without duplicates"
   }
 }

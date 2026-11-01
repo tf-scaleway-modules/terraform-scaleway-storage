@@ -1,0 +1,45 @@
+# Tasks
+
+Run every tool through `mise exec --` from the module root. After each group run `tofu fmt -recursive`, `tofu validate` and `tofu test`, and report the output as-is.
+
+## 1. Project, region, zone, tags
+
+- [x] 1.1 In `variables.tf` replace `organization_id`/`project_name` with `project_id` (UUID validation when set), make `region` default `null` (list validation when set), add `zone` (format validation when set); delete `data.tf`, `local.s3_endpoint`; update the `main.tf` header. Verify: `tofu validate` passes and `grep -r scaleway_account_project .` finds nothing outside `openspec/`.
+- [x] 1.2 Pass `var.project_id`/`var.region` to every resource; add the `key:value` tag local for block resources and merge global `tags` into `scaleway_object`. Verify: new tests in `tests/main.tftest.hcl` for explicit and absent project/region/zone, rejected `project_id`, `region`, `zone`, and the merged tags of a bucket, object, volume and snapshot (distinct, no duplicate).
+- [x] 1.3 Update `tests/main.tftest.hcl`, `tests/examples.tftest.hcl` and the `TESTING.md` mock sample: drop `mock_data "scaleway_account_project"` and the two removed variables. Verify: `tofu test` passes.
+- [x] 1.4 Verify on OpenTofu 1.11.6 (scratch directory outside the module) that a root-module `moved` block can address `module.<name>.scaleway_object_bucket_lock_configuration.this["old"]` to `["data-1"]`. Result (2026-11-01, git-sourced module, existing state): the plan shows "moved from" and no replacement, so the README documents the root-level `moved` form, with `tofu state mv` as an alternative.
+
+## 2. Object Storage
+
+- [x] 2.1 Replace `object_lock_enabled` by `buckets[*].object_lock`, move the three lock validations (mode, single unit, ranges) to `buckets`, delete `bucket_lock_configurations` and its resource `for_each` source; the lock configuration resource iterates buckets with `default_retention`. Verify: tests for `object_lock = {}` (versioning forced, no retention), GOVERNANCE days, and a rejected-input run per validation (bad mode, both units, neither unit, days 36501, years 0).
+- [x] 2.2 Add `lifecycle_rules[*].tags` (null when empty). Verify: test for a tag filter and for a rule without tags.
+- [x] 2.3 Remove the dead `lifecycle { prevent_destroy = false }` and every `depends_on` that restates a reference. Verify: `tofu validate`, `tofu test`.
+- [x] 2.4 Rewrite `outputs.tf` to `buckets` (id, name, region, endpoint, api_endpoint, versioning_enabled, object_lock_enabled, website_endpoint, tags) and `objects` (url from the bucket endpoint); delete the removed outputs. Verify: tests with `mock_resource` defaults for `endpoint`, `api_endpoint`, `website_endpoint` assert the shape; `grep` shows no removed output.
+
+## 3. Block Storage
+
+- [x] 3.1 Remove `prevent_destroy`, its `check` and the literal `lifecycle` block; make `size_in_gb` optional with the "required unless `snapshot_id`" validation; `zone` defaults `null`; volume zone is `each.value.zone` then `var.zone`. Verify: tests for restore without size, rejected missing size, per-volume zone beating `var.zone`, rejected malformed zone.
+- [x] 3.2 Snapshots: `zone` default `null`, imported snapshot zone from `var.zone`, add the `volume_key` existence validation, drop `block_snapshot_exports` for `block_snapshots[*].export` (`bucket`, `key`), delete `block_volume_ids`, `block_volume_names`, `block_snapshot_ids`. Verify: tests for the rejected unknown `volume_key`, imported snapshot in `var.zone`, export after `-<n>` insertion in the output.
+
+## 4. Examples, docs, release notes
+
+- [x] 4.1 Update `examples/minimal` (only `project_id`/`region` as needed) and `examples/complete` (`project_id`, `zone`, `object_lock` with retention, lifecycle `tags`, snapshot-restored volume without size, global tags, new output names), and the example variables and READMEs. Verify: `tofu init -backend=false && tofu validate` in both; the mirrored runs in `tests/examples.tftest.hcl` pass.
+- [x] 4.2 README outside the terraform-docs block: compatibility table (v4 next major, `>= 1.11.0`, `~> 2.89`), a section "Upgrading from v3 to v4" listing every breaking change of the proposal with the consumer edit (region/zone replacement warning first, lock `moved` block, output mapping table), feature table and architecture text for the new outputs. Verify: each proposal breaking row has a README line; no edit between `BEGIN_TF_DOCS` and `END_TF_DOCS`.
+- [x] 4.3 `SECURITY.md`: update the what-lands-in-state table (no secret; policy JSON; tags) and the removal of the project lookup. Verify: read-through against the design's State section.
+
+## 5. Final checks
+
+- [x] 5.1 `mise exec -- tofu fmt -recursive`, `tofu init -backend=false && tofu validate`, `tflint --recursive`, `tofu test` all pass; delete the produced `.terraform.lock.hcl` and `.terraform/` afterwards.
+- [x] 5.2 Move any local `.terraform.lock.hcl` aside, then `mise exec -- pre-commit run -a` (README regenerated by terraform-docs with the constraint `~> 2.89`, not the locked version); restore nothing that was not there.
+- [x] 5.3 `mise exec -- openspec validate --all --strict` passes.
+- [x] 5.4 Commit subject (becomes the CHANGELOG line; avoid the word "changelog", `.cliff.toml` skips it): `Fold object lock into buckets, add lifecycle tag filters and slim outputs; use project_id with optional region and zone`, with a body starting `BREAKING:` that lists the removed inputs and outputs, the region/zone default change and the lock `moved` block. Verify: `git log -1 --format=%s` matches.
+
+## 6. Real-account checks (skipped without credentials; say so when skipped)
+
+- [ ] 6.1 Apply `examples/complete` on a scratch project, then a second `tofu plan`: empty (covers `lifecycle_rule.tags`, object tags, restored volume size, global tags on block resources).
+- [ ] 6.2 Upgrade a v3.0.0 state that holds a bucket lock configuration: plan with the `moved` block shows a move and no destroy; plan without `region`/`zone` set under a different provider default shows the replacement warned about in the README.
+- [ ] 6.3 Confirm `size_in_gb = null` with `snapshot_id` produces an empty second plan.
+
+## Workflow follow-up
+
+- Archive the change after review and the release process (signed tag v4.0.0) per `openspec-archive-change`; confirm the README upgrade section and the `CHANGELOG.md` line at release with `mise run changelog`.

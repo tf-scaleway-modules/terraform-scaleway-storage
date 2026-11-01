@@ -6,18 +6,11 @@ Block Storage volumes with count expansion, sizing, IOPS tier and zone.
 ## Requirements
 
 ### Requirement: Volume input shape
-The `block_volumes` input SHALL be a map of objects with required `size_in_gb` and `iops`, and optional `name`, `count` (default 1), `zone` (default `fr-par-1`), `snapshot_id`, `prevent_destroy` (default `false`) and `tags` (a list of strings, default `[]`). The zone default does not depend on `region`.
+The `block_volumes` input SHALL be a map of objects with required `iops` and optional `size_in_gb`, `name`, `count` (default 1), `zone` (default null), `snapshot_id` and `tags` (a list of strings, default `[]`). It has no `prevent_destroy` attribute.
 
 #### Scenario: Minimal volume
 - **WHEN** `block_volumes = { db = { size_in_gb = 50, iops = 5000 } }`
-- **THEN** one 50 GB, 5000 IOPS volume is planned in zone `fr-par-1` in the project
-
-### Requirement: Prevent destroy is not enforced
-The volume `prevent_destroy` input SHALL be accepted but not enforced, because the module cannot set a per-volume `lifecycle.prevent_destroy`, so the volume resource never blocks destruction. Volume `tags` SHALL be passed as given and are not merged with the global `tags`.
-
-#### Scenario: Volume destroyed
-- **WHEN** a volume sets `prevent_destroy = true` and is removed from the configuration
-- **THEN** the plan still destroys it, after the warning described in "Prevent destroy warning"
+- **THEN** one 50 GB, 5000 IOPS volume is planned in the module zone or the provider default zone
 
 ### Requirement: Volume count expansion and naming
 Each volume SHALL be expanded into `count` volumes keyed `<key>-<n>`. Without `name`, the name is `<key>-volume` (count 1) or `<key>-<n>-volume`; with `name`, it is `<name>` (count 1) or `<name>-<n>`.
@@ -45,14 +38,14 @@ When `snapshot_id` is set it SHALL be passed to the volume so that it is created
 - **THEN** the plan is rejected with "Block volume IOPS must be either 5000 or 15000."
 
 ### Requirement: Minimum size validation
-`size_in_gb` MUST be at least 5.
+When set, `size_in_gb` MUST be at least 5.
 
 #### Scenario: Too small
 - **WHEN** a volume sets `size_in_gb = 4`
 - **THEN** the plan is rejected with "Block volume size must be at least 5 GB."
 
 ### Requirement: Zone format validation
-`zone` MUST match `xx-xxx-N` (two letters, three letters, one digit).
+When set, a volume `zone` MUST match `xx-xxx-N` (two letters, three letters, one digit).
 
 #### Scenario: Malformed zone
 - **WHEN** a volume sets `zone = "paris"`
@@ -66,19 +59,33 @@ Every volume `count` MUST be at least 1.
 - **THEN** the plan is rejected with "Block volume count must be at least 1."
 
 ### Requirement: Volume outputs
-Volumes SHALL be reported in `block_volumes`, `block_volume_ids` and `block_volume_names` keyed by expanded key, with `volume_key` the original key and `index` the position.
+Volumes SHALL be reported in `block_volumes` keyed by expanded key, with `volume_key` the original key and `index` the position.
 
 #### Scenario: Expanded output
 - **WHEN** volume `db` has `count = 2`
-- **THEN** `block_volume_ids` has keys `db-1` and `db-2`
+- **THEN** `block_volumes` has keys `db-1` and `db-2`
 
-### Requirement: Prevent destroy warning
-A `check` SHALL warn at plan time when any volume sets `prevent_destroy = true`, naming those volumes and stating that the setting is not enforced. It SHALL NOT warn when no volume sets it.
+### Requirement: Volume size source
+`size_in_gb` MUST be set unless `snapshot_id` is set; with `snapshot_id` and no `size_in_gb`, the volume takes the snapshot's size.
 
-#### Scenario: prevent_destroy requested
-- **WHEN** volume `db` sets `prevent_destroy = true`
-- **THEN** the plan succeeds and a warning states that `prevent_destroy` is not enforced for `db`
+#### Scenario: Restore without size
+- **WHEN** a volume sets `snapshot_id` and `iops = 5000` and no `size_in_gb`
+- **THEN** the volume is planned without a size and the plan succeeds
 
-#### Scenario: Default
-- **WHEN** no volume sets `prevent_destroy = true`
-- **THEN** no warning is emitted
+#### Scenario: No size and no snapshot
+- **WHEN** a volume sets neither `size_in_gb` nor `snapshot_id`
+- **THEN** the plan is rejected with "Block volume size_in_gb is required unless snapshot_id is set."
+
+### Requirement: Volume zone
+A volume SHALL be created in its own `zone` when set, otherwise in the module `zone`, otherwise in the provider's default zone. The input has no default of its own.
+
+#### Scenario: Per-volume zone wins
+- **WHEN** `zone = "fr-par-1"` and a volume sets `zone = "fr-par-2"`
+- **THEN** the volume is planned in `fr-par-2`
+
+### Requirement: Volume tags
+Each volume SHALL carry its own `tags` (list of strings, default `[]`) followed by the global `tags` rendered `key:value`, without duplicates.
+
+#### Scenario: Merged tags
+- **WHEN** `tags = { env = "prod" }` and a volume sets `tags = ["db", "env:prod"]`
+- **THEN** the volume carries `db` and `env:prod` once each

@@ -28,7 +28,7 @@ It follows infrastructure-as-code best practices with extensive validation and s
 | **Lifecycle Rules** | Automatic transitions to GLACIER, expiration, noncurrent version cleanup, size filters, multipart cleanup |
 | **Default Encryption** | Server-side encryption with SSE-S3 (`AES256`) or SSE-KMS (Key Manager key) |
 | **Static Websites** | Host static websites with custom index and error pages |
-| **Object Lock (WORM)** | Compliance and governance modes for regulatory requirements |
+| **Object Lock (WORM)** | `object_lock` on the bucket: compliance and governance modes with a default retention |
 | **CORS Support** | Cross-Origin Resource Sharing for web applications |
 | **Object Uploads** | Upload files or inline content during provisioning |
 
@@ -40,7 +40,8 @@ It follows infrastructure-as-code best practices with extensive validation and s
 | **High Performance** | Up to 15,000 IOPS for demanding workloads |
 | **Snapshots** | Point-in-time backups for disaster recovery and cloning |
 | **Flexible Sizing** | 5 GB to 10 TB per volume |
-| **Zone Selection** | Deploy in any availability zone within the region |
+| **Zone Selection** | Module-wide `zone` with a per-volume override; `null` keeps the provider default |
+| **Tags** | Global `tags` reach buckets, objects, volumes and snapshots |
 
 ### Expanded Bucket Keys
 
@@ -56,21 +57,65 @@ Always reference buckets using expanded keys in outputs, objects, and policies.
 
 - Terraform >= 1.11.0 or OpenTofu >= 1.11.0
 - Scaleway account with API credentials configured
-- Existing Scaleway project
+- A Scaleway project (optional: without `project_id` the provider's default project is used)
 
 ### Compatibility and upgrade notes
 
 | Module line | OpenTofu / Terraform | `scaleway/scaleway` provider | Last applied provider |
 |-------------|----------------------|------------------------------|-----------------------|
-| next major  | >= 1.11.0            | `~> 2.89`                    | not applied yet (no credentials available; the apply of `examples/complete` was skipped) |
-| previous    | >= 1.11.0            | `~> 2.86`                    | not recorded          |
+| v4 (next major) | >= 1.11.0        | `~> 2.89`                    | not applied yet (no credentials available; the apply of `examples/complete` was skipped) |
+| v3          | >= 1.11.0            | `~> 2.89`                    | not recorded          |
+| v2 and earlier | >= 1.11.0         | `~> 2.86`                    | not recorded          |
 
-Upgrading to the `~> 2.89` line (**breaking**):
+### Upgrading from v3 to v4
 
-- The provider floor moves from `~> 2.86` to `~> 2.89` (`scaleway_block_snapshot.timeouts` needs 2.88.0). Run `tofu init -upgrade` so the lock file moves to 2.89 or later, then review the plan; no diff is expected unless you adopt the new inputs.
-- `STANDARD_IA` in lifecycle `transition` / `noncurrent_version_transition` is now rejected by validation (the provider already refused it); use `STANDARD`, `GLACIER` or `ONEZONE_IA`.
-- The `block_volumes` and `block_snapshots` outputs gain an `srn` key.
-- New optional inputs: `block_snapshots[*].timeouts`, `objects[*].hash`, `objects[*].storage_class`, `objects[*].metadata`.
+v4 is a **breaking** release. Work through the list in order, then run `tofu init -upgrade` and review the plan.
+
+1. **Pin `region` and `zone` first (replacement risk).** `region` and the volume `zone` no longer default to `fr-par` and `fr-par-1`; `null` means the provider's default. If the provider default differs from where your buckets and volumes live, the plan **replaces them** (data loss). Keep them where they are with `region = "fr-par"` and `zone = "fr-par-1"` (module level, or per volume / imported snapshot).
+2. **`organization_id` and `project_name` are removed.** Pass `project_id = "<uuid>"` (for example `data.scaleway_account_project.x.id`), or omit it to use the provider default project. The module no longer looks the project up.
+3. **Object lock moved into `buckets`.** `bucket_lock_configurations` and `buckets[*].object_lock_enabled` are removed:
+
+   | v3 | v4 |
+   |----|----|
+   | `object_lock_enabled = true` | `object_lock = {}` |
+   | `bucket_lock_configurations = { k = { bucket_key = "audit-1", rule = { default_retention = { mode = "COMPLIANCE", years = 7 } } } }` | `object_lock = { default_retention = { mode = "COMPLIANCE", years = 7 } }` on the bucket |
+
+   The lock configuration resource is now keyed by the expanded bucket key (`audit-1`). Add a `moved` block in the **root module** (verified on OpenTofu 1.11.6) so the lock is moved, not destroyed and recreated (which would leave a moment without a default retention):
+
+   ```hcl
+   moved {
+     from = module.storage.scaleway_object_bucket_lock_configuration.this["audit_lock"]
+     to   = module.storage.scaleway_object_bucket_lock_configuration.this["audit-1"]
+   }
+   ```
+
+   Alternative: `tofu state mv 'module.storage.scaleway_object_bucket_lock_configuration.this["audit_lock"]' 'module.storage.scaleway_object_bucket_lock_configuration.this["audit-1"]'`.
+4. **`block_volumes[*].prevent_destroy` is removed** (it was never enforced), together with its `check`. Delete the attribute; protect volumes through plan review and least-privilege credentials.
+5. **`block_snapshots[*].volume_key` must be an expanded volume key** (`db-1`, not `db`). It already failed with an index error; validation now says so.
+6. **Global `tags` reach more resources.** Objects get them merged with their own tags; volumes and snapshots get them as `key:value` strings added to their own list. Expect an in-place tag update on those resources at the first plan.
+7. **Outputs are reduced to `buckets`, `objects`, `block_volumes` and `block_snapshots`.** `buckets` gains `region` and `website_endpoint` and reads `endpoint` / `api_endpoint` from the provider. `block_snapshots[*].export` keeps `bucket` and `key` only (no URL).
+
+   | Removed output | Read instead |
+   |----------------|--------------|
+   | `project_id` | the module's own `project_id` input |
+   | `region` | `buckets[<key>].region` |
+   | `s3_endpoint` | `buckets[<key>].api_endpoint` |
+   | `bucket_names` | `[for b in module.storage.buckets : b.name]` |
+   | `bucket_ids` | `{ for k, b in module.storage.buckets : k => b.id }` |
+   | `bucket_endpoints` | `buckets[<key>].endpoint` |
+   | `bucket_arns` | none (Scaleway policies use bare bucket names: `buckets[<key>].name`) |
+   | `website_endpoints`, `website_urls` | `buckets[<key>].website_endpoint` |
+   | `lock_configurations` | the `object_lock` input you set |
+   | `object_urls` | `{ for k, o in module.storage.objects : k => o.url }` |
+   | `aws_cli_config`, `environment_variables` | `buckets[<key>].api_endpoint` and the region in your own tooling |
+   | `block_volume_ids` | `{ for k, v in module.storage.block_volumes : k => v.id }` |
+   | `block_volume_names` | `[for v in module.storage.block_volumes : v.name]` |
+   | `block_snapshot_ids` | `{ for k, s in module.storage.block_snapshots : k => s.id }` |
+   | `block_snapshot_exports` | `block_snapshots[<key>].export` (`bucket`, `key`); build the URL from the bucket endpoint if needed |
+
+New in v4: `zone`, `lifecycle_rules[*].tags` (tag filter) and `block_volumes[*].size_in_gb` optional when `snapshot_id` is set (the volume takes the snapshot size).
+
+Rollback: pin `v3.0.0` and reverse the `moved` block.
 
 ### Examples
 
@@ -85,8 +130,8 @@ Upgrading to the `~> 2.89` line (**breaking**):
 module "storage" {
   source = "git::https://gitlab.com/leminnov/terraform/modules/scaleway-storage.git?ref=v1.0.0"
 
-  organization_id = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-  project_name    = "my-project"
+  project_id = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"  # null = provider default project
+  region     = "fr-par"
 
   buckets = {
     data = {
@@ -96,7 +141,7 @@ module "storage" {
 }
 
 output "bucket_endpoint" {
-  value = module.storage.bucket_endpoints["data-1"]  # Use expanded key
+  value = module.storage.buckets["data-1"].endpoint  # Use expanded key
 }
 ```
 
@@ -108,10 +153,9 @@ output "bucket_endpoint" {
 module "storage" {
   source = "git::https://gitlab.com/leminnov/terraform/modules/scaleway-storage.git"
 
-  organization_id = var.scw_organization_id
-  project_name    = "production"
-  region          = "fr-par"
-  tags            = { environment = "production", managed-by = "terraform" }
+  project_id = var.scw_project_id
+  region     = "fr-par"
+  tags       = { environment = "production", managed-by = "terraform" }
 
   buckets = {
     logs = {
@@ -158,9 +202,8 @@ module "storage" {
 module "website" {
   source = "git::https://gitlab.com/leminnov/terraform/modules/scaleway-storage.git"
 
-  organization_id = var.scw_organization_id
-  project_name    = "websites"
-  region          = "fr-par"
+  project_id = var.scw_project_id
+  region     = "fr-par"
 
   buckets = {
     website = {
@@ -206,7 +249,7 @@ module "website" {
 }
 
 output "website_url" {
-  value = module.website.website_urls["website-1"]
+  value = module.website.buckets["website-1"].website_endpoint
 }
 ```
 
@@ -216,31 +259,24 @@ output "website_url" {
 module "compliance" {
   source = "git::https://gitlab.com/leminnov/terraform/modules/scaleway-storage.git"
 
-  organization_id = var.scw_organization_id
-  project_name    = "compliance"
-  region          = "fr-par"
+  project_id = var.scw_project_id
+  region     = "fr-par"
 
   buckets = {
     audit = {
-      name                = "mycompany-audit-logs"
-      acl                 = "private"
-      versioning          = true    # Required for object lock
-      object_lock_enabled = true    # Enable WORM - cannot be disabled!
-      force_destroy       = false
+      name          = "mycompany-audit-logs"
+      acl           = "private"
+      force_destroy = false
 
-      tags = { type = "compliance", retention = "7years" }
-    }
-  }
-
-  bucket_lock_configurations = {
-    audit_lock = {
-      bucket_key = "audit-1"  # Use expanded bucket key
-      rule = {
+      # Enables WORM (cannot be disabled!) and forces versioning on
+      object_lock = {
         default_retention = {
           mode  = "COMPLIANCE"  # Cannot be overridden by anyone
-          years = 7            # 7-year retention for compliance
+          years = 7             # 7-year retention for compliance
         }
       }
+
+      tags = { type = "compliance", retention = "7years" }
     }
   }
 }
@@ -252,10 +288,9 @@ module "compliance" {
 module "storage" {
   source = "git::https://gitlab.com/leminnov/terraform/modules/scaleway-storage.git"
 
-  organization_id = var.scw_organization_id
-  project_name    = var.project_name
-  region          = "fr-par"
-  tags            = { environment = var.environment }
+  project_id = var.scw_project_id
+  region     = "fr-par"
+  tags       = { environment = var.environment }
 
   buckets = {
     # Application data (creates: data-1)
@@ -304,19 +339,17 @@ module "storage" {
 module "storage" {
   source = "git::https://gitlab.com/leminnov/terraform/modules/scaleway-storage.git"
 
-  organization_id = var.scw_organization_id
-  project_name    = "production"
-  region          = "fr-par"
+  project_id = var.scw_project_id
+  zone       = "fr-par-1"  # Default zone of the volumes; a volume can override it
 
   # Block Storage Volumes
   block_volumes = {
     # Single database volume (creates: database-1)
     database = {
-      name            = "postgresql-data"
-      size_in_gb      = 100
-      iops            = 15000  # High performance for database
-      zone            = "fr-par-1"
-      tags            = ["database", "production"]
+      name       = "postgresql-data"
+      size_in_gb = 100
+      iops       = 15000  # High performance for database
+      tags       = ["database", "production"]
     }
 
     # Multiple app volumes (creates: app-1, app-2, app-3)
@@ -325,7 +358,6 @@ module "storage" {
       count      = 3           # Create 3 volumes
       size_in_gb = 50
       iops       = 5000        # Standard performance
-      zone       = "fr-par-1"
       tags       = ["application", "production"]
     }
   }
@@ -349,15 +381,11 @@ module "storage" {
 }
 
 output "database_volume_id" {
-  value = module.storage.block_volume_ids["database-1"]  # Expanded key
+  value = module.storage.block_volumes["database-1"].id  # Expanded key
 }
 
 output "app_volume_ids" {
-  value = {
-    app_1 = module.storage.block_volume_ids["app-1"]
-    app_2 = module.storage.block_volume_ids["app-2"]
-    app_3 = module.storage.block_volume_ids["app-3"]
-  }
+  value = { for k, v in module.storage.block_volumes : k => v.id if v.volume_key == "app" }
 }
 ```
 
@@ -367,17 +395,15 @@ output "app_volume_ids" {
 module "storage" {
   source = "git::https://gitlab.com/leminnov/terraform/modules/scaleway-storage.git"
 
-  organization_id = var.scw_organization_id
-  project_name    = "staging"
-  region          = "fr-par"
+  project_id = var.scw_project_id
+  zone       = "fr-par-1"
 
   block_volumes = {
-    # Create volume from existing snapshot for testing
+    # Create volume from existing snapshot for testing; without size_in_gb
+    # the volume takes the size of the snapshot
     database_clone = {
       name        = "postgresql-staging"
-      size_in_gb  = 100
       iops        = 5000
-      zone        = "fr-par-1"
       snapshot_id = "fr-par-1/11111111-1111-1111-1111-111111111111"  # Source snapshot
       tags        = ["database", "staging"]
     }
@@ -432,7 +458,7 @@ module "storage" {
 │         ▼                 ▼                 ▼                    │
 │  ┌────────────────────────────────────────────────────┐         │
 │  │              S3-Compatible API Endpoint             │         │
-│  │         https://s3.fr-par.scw.cloud                │         │
+│  │   buckets[*].api_endpoint (reported by the provider) │        │
 │  └────────────────────────────────────────────────────┘         │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
@@ -464,6 +490,8 @@ module "storage" {
 Scaleway Object Storage is fully S3-compatible. Use standard S3 tools and SDKs:
 
 ### Endpoint Reference
+
+The module reports the endpoints the provider returns in `buckets[*].endpoint`, `.api_endpoint` and `.website_endpoint`. The patterns below are for reference:
 
 | Type | Pattern | Example |
 |------|---------|---------|
@@ -537,48 +565,29 @@ No modules.
 | [scaleway_object_bucket_policy.this](https://registry.terraform.io/providers/scaleway/scaleway/latest/docs/resources/object_bucket_policy) | resource |
 | [scaleway_object_bucket_server_side_encryption_configuration.this](https://registry.terraform.io/providers/scaleway/scaleway/latest/docs/resources/object_bucket_server_side_encryption_configuration) | resource |
 | [scaleway_object_bucket_website_configuration.this](https://registry.terraform.io/providers/scaleway/scaleway/latest/docs/resources/object_bucket_website_configuration) | resource |
-| [scaleway_account_project.project](https://registry.terraform.io/providers/scaleway/scaleway/latest/docs/data-sources/account_project) | data source |
 
 ## Inputs
 
 | Name | Description | Type | Default | Required |
 | ---- | ----------- | ---- | ------- | :------: |
-| <a name="input_block_snapshots"></a> [block\_snapshots](#input\_block\_snapshots) | Map of Block Storage snapshots to create.<br/><br/>Snapshots are point-in-time copies of Block Storage volumes.<br/>Use for backups, disaster recovery, or creating new volumes.<br/><br/>SNAPSHOT CONFIGURATION:<br/>───────────────────────<br/>name       : (Optional) Snapshot name, auto-generated if not provided<br/>count      : (Optional) Number of snapshot instances to create (default: 1)<br/>volume\_key : (Required if no import) Reference to expanded volume key (e.g., "database-1")<br/>zone       : (Optional) Availability Zone (defaults to volume's zone)<br/>tags       : (Optional) Tags for the snapshot<br/>timeouts   : (Optional) create/read/update/delete durations such as "30m" or "1h30m"<br/>             (provider default 5m each); raise create for large exports and imports<br/><br/>EXPORT TO OBJECT STORAGE:<br/>─────────────────────────<br/>Export snapshots as QCOW2 files to Object Storage for offsite backup.<br/>export = {<br/>  bucket = "my-backup-bucket"   # Bucket name (must exist)<br/>  key    = "snapshots/db.qcow2" # Object key/path<br/>}<br/><br/>IMPORT FROM OBJECT STORAGE:<br/>───────────────────────────<br/>Create snapshot from QCOW2 file in Object Storage (instead of volume).<br/>import = {<br/>  bucket = "my-backup-bucket"   # Bucket name<br/>  key    = "snapshots/db.qcow2" # Object key/path<br/>}<br/>Note: When using import, volume\_key is not required.<br/><br/>EXPANDED KEYS:<br/>──────────────<br/>When count > 1, snapshots are created with expanded keys:<br/>- count = 1 → snapshot-1<br/>- count = 3 → snapshot-1, snapshot-2, snapshot-3<br/><br/>USE CASES:<br/>──────────<br/>- Regular backups exported to Object Storage<br/>- Disaster recovery with offsite QCOW2 files<br/>- Cross-zone/region migration via Object Storage<br/>- Creating volumes from archived snapshots | <pre>map(object({<br/>    name       = optional(string)<br/>    count      = optional(number, 1)<br/>    volume_key = optional(string) # Required if no import block<br/>    zone       = optional(string)<br/>    tags       = optional(list(string), [])<br/><br/>    # Operation timeouts, applied to every snapshot of the entry<br/>    timeouts = optional(object({<br/>      create = optional(string)<br/>      read   = optional(string)<br/>      update = optional(string)<br/>      delete = optional(string)<br/>    }))<br/><br/>    # Export snapshot to Object Storage as QCOW2<br/>    export = optional(object({<br/>      bucket = string # Bucket name to export to<br/>      key    = string # Object key/path (e.g., "backups/snapshot.qcow2")<br/>    }))<br/><br/>    # Import snapshot from Object Storage QCOW2 (alternative to volume_key)<br/>    import = optional(object({<br/>      bucket = string # Bucket name to import from<br/>      key    = string # Object key/path (e.g., "backups/snapshot.qcow2")<br/>    }))<br/>  }))</pre> | `{}` | no |
-| <a name="input_block_volumes"></a> [block\_volumes](#input\_block\_volumes) | Map of Block Storage volumes to create.<br/><br/>Block volumes are network-attached SSD storage that can be attached to<br/>Scaleway Instances. They persist independently of Instances and can be<br/>moved between Instances in the same Availability Zone.<br/><br/>VOLUME CONFIGURATION:<br/>─────────────────────<br/>name            : (Optional) Volume name, auto-generated if not provided<br/>count           : (Optional) Number of volume instances to create (default: 1)<br/>size\_in\_gb      : (Required) Volume size in GB (minimum 5 GB)<br/>iops            : (Required) IOPS performance tier - 5000 or 15000<br/>zone            : (Optional) Availability Zone (defaults to fr-par-1 whatever var.region is)<br/>snapshot\_id     : (Optional) Create volume from existing snapshot<br/>prevent\_destroy : (Optional) NOT ENFORCED: lifecycle.prevent\_destroy must be a literal, so<br/>                  the module cannot honour it; setting it to true only raises a plan warning<br/>tags            : (Optional) List of tags for the volume (not merged with var.tags)<br/><br/>IOPS TIERS:<br/>───────────<br/>5000  : Standard performance, suitable for most workloads<br/>15000 : High performance, for databases and I/O intensive applications<br/>        Requires Instance with at least 3 GiB/s block bandwidth<br/><br/>EXPANDED KEYS:<br/>──────────────<br/>When count > 1, volumes are created with expanded keys:<br/>- count = 1 → volume-1<br/>- count = 3 → volume-1, volume-2, volume-3<br/><br/>IMPORTANT NOTES:<br/>────────────────<br/>- IOPS cannot be changed after volume creation<br/>- Volume must be in same zone as Instance to attach<br/>- Minimum size is 5 GB<br/>- Protect production volumes with plan review and least-privilege credentials, not prevent\_destroy | <pre>map(object({<br/>    name            = optional(string)<br/>    count           = optional(number, 1)<br/>    size_in_gb      = number<br/>    iops            = number<br/>    zone            = optional(string, "fr-par-1")<br/>    snapshot_id     = optional(string)<br/>    prevent_destroy = optional(bool, false)<br/>    tags            = optional(list(string), [])<br/>  }))</pre> | `{}` | no |
-| <a name="input_bucket_lock_configurations"></a> [bucket\_lock\_configurations](#input\_bucket\_lock\_configurations) | Map of object lock configurations for WORM compliance.<br/><br/>Object lock prevents object deletion or modification for a retention period.<br/>IMPORTANT: The bucket must have object\_lock\_enabled = true.<br/><br/>LOCK MODES:<br/>───────────<br/>GOVERNANCE  : Can be overridden by users with s3:BypassGovernanceRetention permission<br/>COMPLIANCE  : Cannot be overridden by anyone, including root account (irreversible!)<br/><br/>RETENTION PERIOD (specify exactly one):<br/>───────────────────────────────────────<br/>days  : Number of days to retain (1-36500)<br/>years : Number of years to retain (1-100)<br/><br/>WARNING: COMPLIANCE mode with long retention can make data permanently<br/>immutable. Test thoroughly in non-production environments first. | <pre>map(object({<br/>    bucket_key = string<br/>    rule = object({<br/>      default_retention = object({<br/>        mode  = string<br/>        days  = optional(number)<br/>        years = optional(number)<br/>      })<br/>    })<br/>  }))</pre> | `{}` | no |
+| <a name="input_block_snapshots"></a> [block\_snapshots](#input\_block\_snapshots) | Map of Block Storage snapshots to create.<br/><br/>Snapshots are point-in-time copies of Block Storage volumes.<br/>Use for backups, disaster recovery, or creating new volumes.<br/><br/>SNAPSHOT CONFIGURATION:<br/>───────────────────────<br/>name       : (Optional) Snapshot name, auto-generated if not provided<br/>count      : (Optional) Number of snapshot instances to create (default: 1)<br/>volume\_key : (Required if no import) Reference to expanded volume key (e.g., "database-1")<br/>zone       : (Optional) Availability Zone (from-volume: the volume's zone; imported: var.zone,<br/>             then the provider default zone)<br/>tags       : (Optional) Tags for the snapshot (global tags are added as "key:value")<br/>timeouts   : (Optional) create/read/update/delete durations such as "30m" or "1h30m"<br/>             (provider default 5m each); raise create for large exports and imports<br/><br/>EXPORT TO OBJECT STORAGE:<br/>─────────────────────────<br/>Export snapshots as QCOW2 files to Object Storage for offsite backup.<br/>export = {<br/>  bucket = "my-backup-bucket"   # Bucket name (must exist)<br/>  key    = "snapshots/db.qcow2" # Object key/path<br/>}<br/><br/>IMPORT FROM OBJECT STORAGE:<br/>───────────────────────────<br/>Create snapshot from QCOW2 file in Object Storage (instead of volume).<br/>import = {<br/>  bucket = "my-backup-bucket"   # Bucket name<br/>  key    = "snapshots/db.qcow2" # Object key/path<br/>}<br/>Note: When using import, volume\_key is not required.<br/><br/>EXPANDED KEYS:<br/>──────────────<br/>When count > 1, snapshots are created with expanded keys:<br/>- count = 1 → snapshot-1<br/>- count = 3 → snapshot-1, snapshot-2, snapshot-3<br/><br/>USE CASES:<br/>──────────<br/>- Regular backups exported to Object Storage<br/>- Disaster recovery with offsite QCOW2 files<br/>- Cross-zone/region migration via Object Storage<br/>- Creating volumes from archived snapshots | <pre>map(object({<br/>    name       = optional(string)<br/>    count      = optional(number, 1)<br/>    volume_key = optional(string) # Required if no import block<br/>    zone       = optional(string)<br/>    tags       = optional(list(string), [])<br/><br/>    # Operation timeouts, applied to every snapshot of the entry<br/>    timeouts = optional(object({<br/>      create = optional(string)<br/>      read   = optional(string)<br/>      update = optional(string)<br/>      delete = optional(string)<br/>    }))<br/><br/>    # Export snapshot to Object Storage as QCOW2<br/>    export = optional(object({<br/>      bucket = string # Bucket name to export to<br/>      key    = string # Object key/path (e.g., "backups/snapshot.qcow2")<br/>    }))<br/><br/>    # Import snapshot from Object Storage QCOW2 (alternative to volume_key)<br/>    import = optional(object({<br/>      bucket = string # Bucket name to import from<br/>      key    = string # Object key/path (e.g., "backups/snapshot.qcow2")<br/>    }))<br/>  }))</pre> | `{}` | no |
+| <a name="input_block_volumes"></a> [block\_volumes](#input\_block\_volumes) | Map of Block Storage volumes to create.<br/><br/>Block volumes are network-attached SSD storage that can be attached to<br/>Scaleway Instances. They persist independently of Instances and can be<br/>moved between Instances in the same Availability Zone.<br/><br/>VOLUME CONFIGURATION:<br/>─────────────────────<br/>name            : (Optional) Volume name, auto-generated if not provided<br/>count           : (Optional) Number of volume instances to create (default: 1)<br/>size\_in\_gb      : (Required unless snapshot\_id is set) Volume size in GB (minimum 5 GB);<br/>                  a volume restored from a snapshot takes the snapshot size when unset<br/>iops            : (Required) IOPS performance tier - 5000 or 15000<br/>zone            : (Optional) Availability Zone (defaults to var.zone, then the provider default zone)<br/>snapshot\_id     : (Optional) Create volume from existing snapshot<br/>tags            : (Optional) List of tags for the volume (global tags are added as "key:value")<br/><br/>IOPS TIERS:<br/>───────────<br/>5000  : Standard performance, suitable for most workloads<br/>15000 : High performance, for databases and I/O intensive applications<br/>        Requires Instance with at least 3 GiB/s block bandwidth<br/><br/>EXPANDED KEYS:<br/>──────────────<br/>When count > 1, volumes are created with expanded keys:<br/>- count = 1 → volume-1<br/>- count = 3 → volume-1, volume-2, volume-3<br/><br/>IMPORTANT NOTES:<br/>────────────────<br/>- IOPS cannot be changed after volume creation<br/>- Volume must be in same zone as Instance to attach<br/>- Minimum size is 5 GB<br/>- Protect production volumes with plan review and least-privilege credentials | <pre>map(object({<br/>    name        = optional(string)<br/>    count       = optional(number, 1)<br/>    size_in_gb  = optional(number)<br/>    iops        = number<br/>    zone        = optional(string)<br/>    snapshot_id = optional(string)<br/>    tags        = optional(list(string), [])<br/>  }))</pre> | `{}` | no |
 | <a name="input_bucket_policies"></a> [bucket\_policies](#input\_bucket\_policies) | Map of bucket policies to apply.<br/><br/>Policies provide fine-grained access control using IAM-style JSON documents.<br/>More flexible than ACLs for complex access patterns.<br/><br/>POLICY STRUCTURE:<br/>─────────────────<br/>bucket\_key : Reference to bucket key in var.buckets<br/>policy     : JSON policy document (use jsonencode() for safety)<br/><br/>POLICY DOCUMENT FORMAT (Scaleway S3-compatible):<br/>────────────────────────────────────────────────<br/>{<br/>  "Version": "2023-04-17",<br/>  "Id": "MyPolicy",<br/>  "Statement": [<br/>    {<br/>      "Sid": "UniqueStatementId",<br/>      "Effect": "Allow",<br/>      "Principal": "*" \| { "SCW": "user\_id:<USER\_ID>" },<br/>      "Action": ["s3:GetObject", "s3:PutObject", ...],<br/>      "Resource": ["<bucket-name>/*"]<br/>    }<br/>  ]<br/>}<br/><br/>IMPORTANT NOTES:<br/>────────────────<br/>- Use Version "2023-04-17" (Scaleway's current version, NOT AWS's "2012-10-17")<br/>- Resource format is "<bucket-name>/*" (NOT "arn:scw:s3:::bucket-name/*")<br/>- With 2023-04-17, only explicitly allowed actions are permitted (implicit deny)<br/>- A policy with only Principal:"*" will block your Terraform user from managing the bucket<br/>- Always include your user\_id/application\_id with full S3 permissions<br/><br/>COMMON ACTIONS:<br/>───────────────<br/>s3:GetObject       - Download objects<br/>s3:PutObject       - Upload objects<br/>s3:DeleteObject    - Delete objects<br/>s3:ListBucket      - List bucket contents<br/>s3:GetBucketPolicy - Read bucket policy | <pre>map(object({<br/>    bucket_key = string<br/>    policy     = string<br/>  }))</pre> | `{}` | no |
-| <a name="input_buckets"></a> [buckets](#input\_buckets) | Map of object storage buckets to create.<br/><br/>Each bucket key becomes a reference for other resources (policies, objects).<br/>Bucket names must be globally unique across all Scaleway users.<br/><br/>BUCKET CONFIGURATION OPTIONS:<br/>─────────────────────────────<br/>name                : (Required) Globally unique bucket name<br/>count               : Number of bucket instances to create (default: 1)<br/>acl                 : Access control - private, public-read, authenticated-read (public-read-write blocked for security)<br/>force\_destroy       : Allow deletion of non-empty bucket (default: false)<br/>object\_lock\_enabled : Enable WORM compliance - cannot be disabled once enabled<br/>versioning          : Keep multiple versions of objects<br/>tags                : Additional tags for this bucket<br/><br/>SERVER-SIDE ENCRYPTION (default encryption of new objects):<br/>───────────────────────────────────────────────────────────<br/>sse\_algorithm      : AES256 (default, SSE-S3) or aws:kms (SSE-KMS)<br/>kms\_master\_key\_id  : Key Manager key ID (required with aws:kms only)<br/>bucket\_key\_enabled : Use bucket keys to reduce SSE-KMS calls<br/><br/>CORS RULES (for web browser access):<br/>────────────────────────────────────<br/>allowed\_headers : Headers allowed in preflight requests (default: ["*"])<br/>allowed\_methods : HTTP methods allowed (GET, PUT, POST, DELETE, HEAD)<br/>allowed\_origins : Origins allowed to make requests<br/>expose\_headers  : Headers exposed to browser<br/>max\_age\_seconds : Preflight cache duration (default: 3600)<br/><br/>LIFECYCLE RULES (automatic object management):<br/>──────────────────────────────────────────────<br/>id         : Unique rule identifier<br/>enabled    : Whether rule is active (default: true)<br/>prefix     : Apply to objects with this prefix (empty = all)<br/>expiration : Auto-delete after N days and/or remove expired delete markers<br/>transition : Move to storage class (STANDARD, GLACIER, ONEZONE\_IA) after N days<br/>noncurrent\_version\_expiration : Delete noncurrent versions (versioned buckets)<br/>noncurrent\_version\_transition : Move noncurrent versions to a storage class<br/>object\_size\_greater\_than / object\_size\_less\_than : Size filters (bytes)<br/>abort\_incomplete\_multipart\_upload : Clean up failed uploads<br/><br/>WEBSITE HOSTING:<br/>────────────────<br/>index\_document : Default page (e.g., "index.html")<br/>error\_document : Error page (default: "error.html") | <pre>map(object({<br/>    # Core bucket settings<br/>    name                = string<br/>    count               = optional(number, 1) # Number of buckets to create (appends -1, -2, etc. to name)<br/>    acl                 = optional(string, "private")<br/>    force_destroy       = optional(bool, false)<br/>    object_lock_enabled = optional(bool, false)<br/>    versioning          = optional(bool, false)<br/>    tags                = optional(map(string), {})<br/><br/>    # Default server-side encryption (SSE-S3 or SSE-KMS)<br/>    server_side_encryption = optional(object({<br/>      sse_algorithm      = optional(string, "AES256")<br/>      kms_master_key_id  = optional(string)<br/>      bucket_key_enabled = optional(bool)<br/>    }), null)<br/><br/>    # CORS configuration for web access<br/>    cors_rules = optional(list(object({<br/>      allowed_headers = optional(list(string), ["*"])<br/>      allowed_methods = list(string)<br/>      allowed_origins = list(string)<br/>      expose_headers  = optional(list(string), [])<br/>      max_age_seconds = optional(number, 3600)<br/>    })), [])<br/><br/>    # Lifecycle management rules<br/>    lifecycle_rules = optional(list(object({<br/>      id      = string<br/>      enabled = optional(bool, true)<br/>      prefix  = optional(string, "")<br/><br/>      # Object size filters, in bytes<br/>      object_size_greater_than = optional(number)<br/>      object_size_less_than    = optional(number)<br/><br/>      expiration = optional(object({<br/>        days                         = optional(number)<br/>        expired_object_delete_marker = optional(bool)<br/>      }), null)<br/><br/>      transition = optional(list(object({<br/>        days          = number<br/>        storage_class = string<br/>      })), [])<br/><br/>      # Noncurrent object versions (versioned buckets)<br/>      noncurrent_version_expiration = optional(object({<br/>        noncurrent_days           = optional(number)<br/>        newer_noncurrent_versions = optional(number)<br/>      }), null)<br/><br/>      noncurrent_version_transition = optional(list(object({<br/>        noncurrent_days           = number<br/>        storage_class             = string<br/>        newer_noncurrent_versions = optional(number)<br/>      })), [])<br/><br/>      abort_incomplete_multipart_upload = optional(object({<br/>        days_after_initiation = number<br/>      }), null)<br/>    })), [])<br/><br/>    # Static website configuration<br/>    website = optional(object({<br/>      index_document = string<br/>      error_document = optional(string, "error.html")<br/>    }), null)<br/>  }))</pre> | `{}` | no |
-| <a name="input_objects"></a> [objects](#input\_objects) | Map of objects to upload to buckets.<br/><br/>Objects can be uploaded from local files or inline content.<br/>Use for configuration files, static assets, or initial seed data.<br/><br/>OBJECT CONFIGURATION:<br/>─────────────────────<br/>bucket\_key   : Reference to bucket key in var.buckets<br/>key          : Object path in bucket (e.g., "images/logo.png")<br/>source       : Local file path (mutually exclusive with content)<br/>content      : Inline string content (mutually exclusive with source)<br/>content\_type : MIME type (auto-detected if not specified)<br/>visibility   : private (default) or public-read<br/>tags         : Object-level tags<br/>hash         : (Optional) Triggers a re-upload when it changes; use filemd5(path)<br/>               with source so a modified file is uploaded again<br/>storage\_class: (Optional) STANDARD, GLACIER or ONEZONE\_IA (provider default if unset)<br/>metadata     : (Optional) Map of object metadata; keys must be lowercase<br/><br/>COMMON MIME TYPES:<br/>──────────────────<br/>text/html              - HTML files<br/>text/css               - CSS stylesheets<br/>text/javascript        - JavaScript files<br/>application/json       - JSON data<br/>image/png, image/jpeg  - Images<br/>application/pdf        - PDF documents | <pre>map(object({<br/>    bucket_key    = string<br/>    key           = string<br/>    source        = optional(string)<br/>    content       = optional(string)<br/>    content_type  = optional(string)<br/>    visibility    = optional(string, "private")<br/>    tags          = optional(map(string), {})<br/>    hash          = optional(string)<br/>    storage_class = optional(string)<br/>    metadata      = optional(map(string))<br/>  }))</pre> | `{}` | no |
-| <a name="input_organization_id"></a> [organization\_id](#input\_organization\_id) | Scaleway Organization ID.<br/><br/>The organization is the top-level entity in Scaleway's hierarchy.<br/>Find this in the Scaleway Console under Organization Settings.<br/><br/>Format: UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx) | `string` | n/a | yes |
-| <a name="input_project_name"></a> [project\_name](#input\_project\_name) | Scaleway Project name where all resources will be created.<br/><br/>Projects provide logical isolation within an organization.<br/>All buckets, objects, and policies will be created in this project.<br/><br/>Naming rules:<br/>- Must start with a lowercase letter<br/>- Can contain lowercase letters, numbers, and hyphens<br/>- Must be 2-63 characters long | `string` | n/a | yes |
-| <a name="input_region"></a> [region](#input\_region) | Scaleway region for object storage.<br/><br/>Available regions:<br/>- fr-par: Paris, France (Europe)<br/>- nl-ams: Amsterdam, Netherlands (Europe)<br/>- pl-waw: Warsaw, Poland (Europe)<br/><br/>Choose the region closest to your users for optimal latency.<br/>Data residency requirements may also influence this choice. | `string` | `"fr-par"` | no |
-| <a name="input_tags"></a> [tags](#input\_tags) | Global tags merged into the tags of every bucket (bucket tags win on a shared key).<br/>Block volumes and snapshots take their own list of strings and do not use them.<br/><br/>Tags are key-value pairs for organizing and categorizing resources.<br/>Common uses:<br/>- Environment identification (environment:production)<br/>- Cost allocation (team:platform, project:website)<br/>- Automation (managed-by:terraform)<br/><br/>Format: Map of strings (e.g., {env = "prod", team = "devops"}) | `map(string)` | `{}` | no |
+| <a name="input_buckets"></a> [buckets](#input\_buckets) | Map of object storage buckets to create.<br/><br/>Each bucket key becomes a reference for other resources (policies, objects).<br/>Bucket names must be globally unique across all Scaleway users.<br/><br/>BUCKET CONFIGURATION OPTIONS:<br/>─────────────────────────────<br/>name                : (Required) Globally unique bucket name<br/>count               : Number of bucket instances to create (default: 1)<br/>acl                 : Access control - private, public-read, authenticated-read (public-read-write blocked for security)<br/>force\_destroy       : Allow deletion of non-empty bucket (default: false)<br/>object\_lock         : Enable WORM compliance (forces versioning) - cannot be disabled once enabled;<br/>                      set default\_retention to apply a retention to new objects<br/>versioning          : Keep multiple versions of objects<br/>tags                : Additional tags for this bucket (merged over the global tags)<br/><br/>SERVER-SIDE ENCRYPTION (default encryption of new objects):<br/>───────────────────────────────────────────────────────────<br/>sse\_algorithm      : AES256 (default, SSE-S3) or aws:kms (SSE-KMS)<br/>kms\_master\_key\_id  : Key Manager key ID (required with aws:kms only)<br/>bucket\_key\_enabled : Use bucket keys to reduce SSE-KMS calls<br/><br/>CORS RULES (for web browser access):<br/>────────────────────────────────────<br/>allowed\_headers : Headers allowed in preflight requests (default: ["*"])<br/>allowed\_methods : HTTP methods allowed (GET, PUT, POST, DELETE, HEAD)<br/>allowed\_origins : Origins allowed to make requests<br/>expose\_headers  : Headers exposed to browser<br/>max\_age\_seconds : Preflight cache duration (default: 3600)<br/><br/>OBJECT LOCK (WORM):<br/>───────────────────<br/>object\_lock = {<br/>  default\_retention = {         # optional; omit for lock without a default retention<br/>    mode  = "GOVERNANCE"        # GOVERNANCE: bypassable with s3:BypassGovernanceRetention<br/>                                # COMPLIANCE: cannot be overridden by anyone (irreversible!)<br/>    days  = 30                  # exactly one of days (1-36500) or years (1-100)<br/>  }<br/>}<br/>WARNING: COMPLIANCE with a long retention can make data permanently immutable.<br/><br/>LIFECYCLE RULES (automatic object management):<br/>──────────────────────────────────────────────<br/>id         : Unique rule identifier<br/>enabled    : Whether rule is active (default: true)<br/>prefix     : Apply to objects with this prefix (empty = all)<br/>tags       : Apply to objects carrying all these tags (empty = no tag filter)<br/>expiration : Auto-delete after N days and/or remove expired delete markers<br/>transition : Move to storage class (STANDARD, GLACIER, ONEZONE\_IA) after N days<br/>noncurrent\_version\_expiration : Delete noncurrent versions (versioned buckets)<br/>noncurrent\_version\_transition : Move noncurrent versions to a storage class<br/>object\_size\_greater\_than / object\_size\_less\_than : Size filters (bytes)<br/>abort\_incomplete\_multipart\_upload : Clean up failed uploads<br/><br/>WEBSITE HOSTING:<br/>────────────────<br/>index\_document : Default page (e.g., "index.html")<br/>error\_document : Error page (default: "error.html") | <pre>map(object({<br/>    # Core bucket settings<br/>    name          = string<br/>    count         = optional(number, 1) # Number of buckets to create (appends -1, -2, etc. to name)<br/>    acl           = optional(string, "private")<br/>    force_destroy = optional(bool, false)<br/>    versioning    = optional(bool, false)<br/>    tags          = optional(map(string), {})<br/><br/>    # WORM: enables object lock (and versioning); default_retention is optional<br/>    object_lock = optional(object({<br/>      default_retention = optional(object({<br/>        mode  = string<br/>        days  = optional(number)<br/>        years = optional(number)<br/>      }))<br/>    }))<br/><br/>    # Default server-side encryption (SSE-S3 or SSE-KMS)<br/>    server_side_encryption = optional(object({<br/>      sse_algorithm      = optional(string, "AES256")<br/>      kms_master_key_id  = optional(string)<br/>      bucket_key_enabled = optional(bool)<br/>    }), null)<br/><br/>    # CORS configuration for web access<br/>    cors_rules = optional(list(object({<br/>      allowed_headers = optional(list(string), ["*"])<br/>      allowed_methods = list(string)<br/>      allowed_origins = list(string)<br/>      expose_headers  = optional(list(string), [])<br/>      max_age_seconds = optional(number, 3600)<br/>    })), [])<br/><br/>    # Lifecycle management rules<br/>    lifecycle_rules = optional(list(object({<br/>      id      = string<br/>      enabled = optional(bool, true)<br/>      prefix  = optional(string, "")<br/>      tags    = optional(map(string), {})<br/><br/>      # Object size filters, in bytes<br/>      object_size_greater_than = optional(number)<br/>      object_size_less_than    = optional(number)<br/><br/>      expiration = optional(object({<br/>        days                         = optional(number)<br/>        expired_object_delete_marker = optional(bool)<br/>      }), null)<br/><br/>      transition = optional(list(object({<br/>        days          = number<br/>        storage_class = string<br/>      })), [])<br/><br/>      # Noncurrent object versions (versioned buckets)<br/>      noncurrent_version_expiration = optional(object({<br/>        noncurrent_days           = optional(number)<br/>        newer_noncurrent_versions = optional(number)<br/>      }), null)<br/><br/>      noncurrent_version_transition = optional(list(object({<br/>        noncurrent_days           = number<br/>        storage_class             = string<br/>        newer_noncurrent_versions = optional(number)<br/>      })), [])<br/><br/>      abort_incomplete_multipart_upload = optional(object({<br/>        days_after_initiation = number<br/>      }), null)<br/>    })), [])<br/><br/>    # Static website configuration<br/>    website = optional(object({<br/>      index_document = string<br/>      error_document = optional(string, "error.html")<br/>    }), null)<br/>  }))</pre> | `{}` | no |
+| <a name="input_objects"></a> [objects](#input\_objects) | Map of objects to upload to buckets.<br/><br/>Objects can be uploaded from local files or inline content.<br/>Use for configuration files, static assets, or initial seed data.<br/><br/>OBJECT CONFIGURATION:<br/>─────────────────────<br/>bucket\_key   : Reference to bucket key in var.buckets<br/>key          : Object path in bucket (e.g., "images/logo.png")<br/>source       : Local file path (mutually exclusive with content)<br/>content      : Inline string content (mutually exclusive with source)<br/>content\_type : MIME type (auto-detected if not specified)<br/>visibility   : private (default) or public-read<br/>tags         : Object-level tags (merged over the global tags)<br/>hash         : (Optional) Triggers a re-upload when it changes; use filemd5(path)<br/>               with source so a modified file is uploaded again<br/>storage\_class: (Optional) STANDARD, GLACIER or ONEZONE\_IA (provider default if unset)<br/>metadata     : (Optional) Map of object metadata; keys must be lowercase<br/><br/>COMMON MIME TYPES:<br/>──────────────────<br/>text/html              - HTML files<br/>text/css               - CSS stylesheets<br/>text/javascript        - JavaScript files<br/>application/json       - JSON data<br/>image/png, image/jpeg  - Images<br/>application/pdf        - PDF documents | <pre>map(object({<br/>    bucket_key    = string<br/>    key           = string<br/>    source        = optional(string)<br/>    content       = optional(string)<br/>    content_type  = optional(string)<br/>    visibility    = optional(string, "private")<br/>    tags          = optional(map(string), {})<br/>    hash          = optional(string)<br/>    storage_class = optional(string)<br/>    metadata      = optional(map(string))<br/>  }))</pre> | `{}` | no |
+| <a name="input_project_id"></a> [project\_id](#input\_project\_id) | Scaleway Project ID where all resources are created.<br/><br/>Projects provide logical isolation within an organization.<br/>When null, the provider's default project is used.<br/><br/>Format: UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx) | `string` | `null` | no |
+| <a name="input_region"></a> [region](#input\_region) | Scaleway region for Object Storage.<br/><br/>When null, the provider's default region is used. A default region that<br/>differs from the one the buckets were created in forces their replacement.<br/><br/>Available regions:<br/>- fr-par: Paris, France (Europe)<br/>- nl-ams: Amsterdam, Netherlands (Europe)<br/>- pl-waw: Warsaw, Poland (Europe)<br/><br/>Choose the region closest to your users for optimal latency.<br/>Data residency requirements may also influence this choice. | `string` | `null` | no |
+| <a name="input_tags"></a> [tags](#input\_tags) | Global tags applied to every taggable resource.<br/><br/>Buckets and objects receive them merged with their own tags (the per-item<br/>value wins on a shared key). Block volumes and snapshots take lists of<br/>strings, so the global tags are added to theirs as "key:value" strings<br/>without duplicates.<br/><br/>Common uses:<br/>- Environment identification (environment = "production")<br/>- Cost allocation (team = "platform", project = "website")<br/>- Automation (managed-by = "terraform")<br/><br/>Format: Map of strings (e.g., {env = "prod", team = "devops"}) | `map(string)` | `{}` | no |
+| <a name="input_zone"></a> [zone](#input\_zone) | Default Availability Zone of Block Storage volumes and imported snapshots<br/>that set no zone of their own (for example fr-par-1).<br/><br/>When null, the provider's default zone is used. A default zone that differs<br/>from the one the volumes were created in forces their replacement. | `string` | `null` | no |
 
 ## Outputs
 
 | Name | Description |
 | ---- | ----------- |
-| <a name="output_aws_cli_config"></a> [aws\_cli\_config](#output\_aws\_cli\_config) | AWS CLI configuration commands for connecting to Scaleway Object Storage.<br/><br/>Run these commands to configure the AWS CLI:<br/>aws configure set s3.endpoint\_url <s3\_endpoint><br/>aws configure set default.region <region> |
-| <a name="output_block_snapshot_exports"></a> [block\_snapshot\_exports](#output\_block\_snapshot\_exports) | Map of snapshots configured for export to Object Storage.<br/><br/>Each entry includes:<br/>- snapshot\_id: The snapshot ID<br/>- bucket: Destination bucket name<br/>- key: Object key/path for the QCOW2 file<br/>- url: Full S3 URL to the exported file |
-| <a name="output_block_snapshot_ids"></a> [block\_snapshot\_ids](#output\_block\_snapshot\_ids) | Map of expanded snapshot keys to their Scaleway resource IDs. |
 | <a name="output_block_snapshots"></a> [block\_snapshots](#output\_block\_snapshots) | Map of all created Block Storage snapshots with their details.<br/><br/>Keys use expanded format (e.g., "backup-1", "backup-2").<br/>Includes both volume-based and imported snapshots.<br/><br/>Each snapshot includes:<br/>- id: Snapshot ID<br/>- srn: Scaleway Resource Name<br/>- name: Snapshot name<br/>- volume\_id: Source volume ID (null for imported snapshots)<br/>- zone: Availability Zone<br/>- snapshot\_key: Original snapshot key (before expansion)<br/>- index: Instance index (1, 2, 3, ...)<br/>- source: "volume" or "import"<br/>- export: Export details if configured (bucket, key) |
-| <a name="output_block_volume_ids"></a> [block\_volume\_ids](#output\_block\_volume\_ids) | Map of expanded volume keys to their Scaleway resource IDs. |
-| <a name="output_block_volume_names"></a> [block\_volume\_names](#output\_block\_volume\_names) | List of all block volume names created by this module. |
 | <a name="output_block_volumes"></a> [block\_volumes](#output\_block\_volumes) | Map of all created Block Storage volumes with their details.<br/><br/>Keys use expanded format (e.g., "database-1", "database-2").<br/><br/>Each volume includes:<br/>- id: Volume ID (zoned format: zone/uuid)<br/>- srn: Scaleway Resource Name<br/>- name: Volume name<br/>- size\_in\_gb: Volume size<br/>- iops: IOPS performance tier<br/>- zone: Availability Zone<br/>- volume\_key: Original volume key (before expansion)<br/>- index: Instance index (1, 2, 3, ...) |
-| <a name="output_bucket_arns"></a> [bucket\_arns](#output\_bucket\_arns) | Map of bucket keys to their ARN-style identifiers.<br/><br/>Format: arn:scw:s3:::<bucket-name><br/>Use in bucket policies and IAM configurations. |
-| <a name="output_bucket_endpoints"></a> [bucket\_endpoints](#output\_bucket\_endpoints) | Map of bucket keys to their S3 endpoints.<br/><br/>Format: https://<bucket-name>.s3.<region>.scw.cloud<br/>Use these URLs for direct bucket access via S3 protocol. |
-| <a name="output_bucket_ids"></a> [bucket\_ids](#output\_bucket\_ids) | Map of bucket keys to their Scaleway resource IDs. |
-| <a name="output_bucket_names"></a> [bucket\_names](#output\_bucket\_names) | List of all bucket names created by this module. |
-| <a name="output_buckets"></a> [buckets](#output\_buckets) | Map of all created buckets with their complete details.<br/><br/>Each bucket includes:<br/>- id: Scaleway resource ID<br/>- name: Bucket name<br/>- endpoint: S3 bucket endpoint URL<br/>- api\_endpoint: S3 API endpoint<br/>- versioning\_enabled: Whether versioning is active<br/>- object\_lock\_enabled: Whether WORM is enabled<br/>- tags: Applied tags |
-| <a name="output_environment_variables"></a> [environment\_variables](#output\_environment\_variables) | Environment variables for S3-compatible tools.<br/><br/>Export these in your shell or CI/CD pipeline:<br/>export AWS\_ENDPOINT\_URL\_S3=<endpoint><br/>export AWS\_REGION=<region> |
-| <a name="output_lock_configurations"></a> [lock\_configurations](#output\_lock\_configurations) | Map of bucket lock configurations for WORM compliance.<br/><br/>Includes retention mode and period for each configured bucket. |
-| <a name="output_object_urls"></a> [object\_urls](#output\_object\_urls) | Map of object keys to their direct URLs. |
-| <a name="output_objects"></a> [objects](#output\_objects) | Map of all uploaded objects with their details.<br/><br/>Includes object location, content type, and visibility. |
-| <a name="output_project_id"></a> [project\_id](#output\_project\_id) | Scaleway Project ID where all resources are created. |
-| <a name="output_region"></a> [region](#output\_region) | Region of the Object Storage resources and endpoints (Block Storage uses zones). |
-| <a name="output_s3_endpoint"></a> [s3\_endpoint](#output\_s3\_endpoint) | S3 API endpoint for the configured region.<br/><br/>Use this endpoint to configure S3-compatible clients:<br/>- AWS CLI: aws configure set s3.endpoint\_url <endpoint><br/>- AWS SDK: endpoint\_url parameter<br/>- s3cmd, rclone, etc. |
-| <a name="output_website_endpoints"></a> [website\_endpoints](#output\_website\_endpoints) | Map of bucket keys to their static website endpoints.<br/><br/>Only populated for buckets with website configuration.<br/>Format: https://<bucket-name>.s3-website.<region>.scw.cloud |
-| <a name="output_website_urls"></a> [website\_urls](#output\_website\_urls) | Simple map of bucket keys to website URLs (for buckets with website config). |
+| <a name="output_buckets"></a> [buckets](#output\_buckets) | Map of all created buckets with their complete details, keyed by expanded<br/>bucket key (e.g., "data-1").<br/><br/>Each bucket includes:<br/>- id: Scaleway resource ID<br/>- name: Bucket name<br/>- region: Region of the bucket<br/>- endpoint: S3 bucket endpoint URL (reported by the provider)<br/>- api\_endpoint: S3 API endpoint (reported by the provider)<br/>- versioning\_enabled: Whether versioning is active<br/>- object\_lock\_enabled: Whether WORM is enabled<br/>- website\_endpoint: Static website endpoint (null without a website)<br/>- tags: Applied tags |
+| <a name="output_objects"></a> [objects](#output\_objects) | Map of all uploaded objects with their details, keyed like the objects input.<br/><br/>Each object includes:<br/>- id: Scaleway resource ID<br/>- bucket: Bucket name<br/>- key: Object key<br/>- url: Object URL (the bucket endpoint reported by the provider, then the key)<br/>- content\_type: MIME type<br/>- visibility: private or public-read |
 <!-- END_TF_DOCS -->
 
 ## Documentation
@@ -599,10 +608,10 @@ No modules.
 | `acl` | string | `"private"` | Access control: private, public-read, authenticated-read |
 | `force_destroy` | bool | `false` | Allow deletion of non-empty bucket |
 | `versioning` | bool | `false` | Enable object versioning |
-| `object_lock_enabled` | bool | `false` | Enable WORM (cannot be disabled once enabled) |
-| `tags` | map(string) | `{}` | Bucket-specific tags |
+| `object_lock` | object | `null` | Enable WORM and force versioning (cannot be disabled once enabled); optional `default_retention` with `mode`, `days` or `years` |
+| `tags` | map(string) | `{}` | Bucket-specific tags (merged over the global `tags`) |
 | `cors_rules` | list(object) | `[]` | CORS configuration |
-| `lifecycle_rules` | list(object) | `[]` | Lifecycle management rules (incl. `noncurrent_version_expiration`/`noncurrent_version_transition`) |
+| `lifecycle_rules` | list(object) | `[]` | Lifecycle management rules (incl. `tags` filter, `noncurrent_version_expiration`/`noncurrent_version_transition`) |
 | `server_side_encryption` | object | `null` | Default encryption: `sse_algorithm` (`AES256`/`aws:kms`), `kms_master_key_id`, `bucket_key_enabled` |
 | `website` | object | `null` | Static website configuration |
 
@@ -624,14 +633,15 @@ Always reference volumes using expanded keys in snapshots and outputs.
 |-----------|------|---------|-------------|
 | `name` | string | auto | Volume name (defaults to `<key>-volume`) |
 | `count` | number | `1` | Number of volume instances to create |
-| `size_in_gb` | number | required | Volume size in GB (5-10000) |
+| `size_in_gb` | number | required* | Volume size in GB (5-10000); optional with `snapshot_id` (the snapshot size is used) |
 | `iops` | number | required | Performance tier: `5000` (standard) or `15000` (high) |
-| `zone` | string | `"fr-par-1"` | Availability zone (default does not follow `region`) |
+| `zone` | string | `null` | Availability zone; falls back to the module `zone`, then the provider default |
 | `snapshot_id` | string | `null` | Create volume from snapshot |
-| `prevent_destroy` | bool | `false` | **Not enforced**; `true` only raises a plan warning |
-| `tags` | list(string) | `[]` | Resource tags (not merged with the global `tags`) |
+| `tags` | list(string) | `[]` | Resource tags (the global `tags` are added as `key:value`) |
 
-> **Note**: `prevent_destroy` is not enforced. Terraform requires a literal for `lifecycle.prevent_destroy`, so the module cannot honour a per-volume value and a `check` warns when it is `true`. Review plans for unexpected destroys.
+*`size_in_gb` is required unless `snapshot_id` is set.
+
+> **Note**: protect volumes through plan review and least-privilege credentials; the module has no `prevent_destroy` input.
 
 ### Block Snapshot
 
@@ -640,8 +650,8 @@ Always reference volumes using expanded keys in snapshots and outputs.
 | `name` | string | auto | Snapshot name (defaults to `<key>-snapshot`) |
 | `count` | number | `1` | Number of snapshot instances to create |
 | `volume_key` | string | required* | Reference to **expanded** volume key (e.g., `database-1`) |
-| `zone` | string | volume zone | Availability zone |
-| `tags` | list(string) | `[]` | Resource tags |
+| `zone` | string | volume zone | Availability zone (imported snapshots: module `zone`, then the provider default) |
+| `tags` | list(string) | `[]` | Resource tags (the global `tags` are added as `key:value`) |
 | `export` | object | `null` | Export snapshot to Object Storage (see below) |
 | `import` | object | `null` | Import snapshot from Object Storage (see below) |
 
@@ -731,7 +741,7 @@ Bucket names are globally unique. Add a unique prefix (company name, project ID)
 ```
 Error: Object lock requires versioning to be enabled
 ```
-Set `versioning = true` when using `object_lock_enabled = true`.
+Versioning is forced on whenever `object_lock` is set, so no separate `versioning = true` is needed.
 
 **Cannot delete non-empty bucket**
 ```
