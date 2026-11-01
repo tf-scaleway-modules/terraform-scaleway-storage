@@ -14,17 +14,17 @@ resource "scaleway_object_bucket" "this" {
 
   name       = each.value.name
   region     = var.region
-  project_id = data.scaleway_account_project.project.id
+  project_id = var.project_id
 
   # force_destroy: When true, bucket can be deleted even if not empty.
   # WARNING: Set to false in production to prevent accidental data loss.
   force_destroy = each.value.force_destroy
 
   # Object lock cannot be disabled once enabled and forces versioning on.
-  object_lock_enabled = each.value.object_lock_enabled
+  object_lock_enabled = each.value.object_lock != null
 
   versioning {
-    enabled = each.value.versioning || each.value.object_lock_enabled
+    enabled = each.value.versioning || each.value.object_lock != null
   }
 
   dynamic "lifecycle_rule" {
@@ -34,6 +34,9 @@ resource "scaleway_object_bucket" "this" {
       id      = lifecycle_rule.value.id
       prefix  = lifecycle_rule.value.prefix
       enabled = lifecycle_rule.value.enabled
+
+      # Sent only when set: an empty map would diff against a state holding none.
+      tags = length(lifecycle_rule.value.tags) > 0 ? lifecycle_rule.value.tags : null
 
       object_size_greater_than = lifecycle_rule.value.object_size_greater_than
       object_size_less_than    = lifecycle_rule.value.object_size_less_than
@@ -91,11 +94,6 @@ resource "scaleway_object_bucket" "this" {
   }
 
   tags = merge(var.tags, each.value.tags)
-
-  lifecycle {
-    # Must stay a literal; false keeps destroy possible for every consumer.
-    prevent_destroy = false
-  }
 }
 
 # ==============================================================================
@@ -110,10 +108,8 @@ resource "scaleway_object_bucket_acl" "this" {
 
   bucket     = scaleway_object_bucket.this[each.key].name
   region     = var.region
-  project_id = data.scaleway_account_project.project.id
+  project_id = var.project_id
   acl        = each.value.acl
-
-  depends_on = [scaleway_object_bucket.this]
 }
 
 # ==============================================================================
@@ -127,7 +123,7 @@ resource "scaleway_object_bucket_server_side_encryption_configuration" "this" {
 
   bucket     = scaleway_object_bucket.this[each.key].name
   region     = var.region
-  project_id = data.scaleway_account_project.project.id
+  project_id = var.project_id
 
   rule {
     bucket_key_enabled = each.value.server_side_encryption.bucket_key_enabled
@@ -137,8 +133,6 @@ resource "scaleway_object_bucket_server_side_encryption_configuration" "this" {
       kms_master_key_id = each.value.server_side_encryption.kms_master_key_id
     }
   }
-
-  depends_on = [scaleway_object_bucket.this]
 }
 
 # ==============================================================================
@@ -152,7 +146,7 @@ resource "scaleway_object_bucket_website_configuration" "this" {
 
   bucket     = scaleway_object_bucket.this[each.key].name
   region     = var.region
-  project_id = data.scaleway_account_project.project.id
+  project_id = var.project_id
 
   index_document {
     suffix = each.value.website.index_document
@@ -161,8 +155,6 @@ resource "scaleway_object_bucket_website_configuration" "this" {
   error_document {
     key = each.value.website.error_document
   }
-
-  depends_on = [scaleway_object_bucket.this]
 }
 
 # ==============================================================================
@@ -173,22 +165,19 @@ resource "scaleway_object_bucket_website_configuration" "this" {
 # ==============================================================================
 
 resource "scaleway_object_bucket_lock_configuration" "this" {
-  for_each = var.bucket_lock_configurations
+  for_each = local.bucket_retentions
 
-  # bucket_key references an expanded key (e.g., "data-1" not "data").
-  bucket     = scaleway_object_bucket.this[each.value.bucket_key].name
+  bucket     = scaleway_object_bucket.this[each.key].name
   region     = var.region
-  project_id = data.scaleway_account_project.project.id
+  project_id = var.project_id
 
   rule {
     default_retention {
-      mode  = each.value.rule.default_retention.mode
-      days  = each.value.rule.default_retention.days
-      years = each.value.rule.default_retention.years
+      mode  = each.value.mode
+      days  = each.value.days
+      years = each.value.years
     }
   }
-
-  depends_on = [scaleway_object_bucket.this]
 }
 
 # ==============================================================================
@@ -204,10 +193,8 @@ resource "scaleway_object_bucket_policy" "this" {
 
   bucket     = scaleway_object_bucket.this[each.value.bucket_key].name
   region     = var.region
-  project_id = data.scaleway_account_project.project.id
+  project_id = var.project_id
   policy     = each.value.policy
-
-  depends_on = [scaleway_object_bucket.this]
 }
 
 # ==============================================================================
@@ -222,17 +209,15 @@ resource "scaleway_object" "this" {
 
   bucket     = scaleway_object_bucket.this[each.value.bucket_key].name
   region     = var.region
-  project_id = data.scaleway_account_project.project.id
+  project_id = var.project_id
 
   key           = each.value.key
   file          = each.value.source
   content       = each.value.content
   content_type  = each.value.content_type
   visibility    = each.value.visibility
-  tags          = each.value.tags
+  tags          = merge(var.tags, each.value.tags)
   hash          = each.value.hash
   storage_class = each.value.storage_class
   metadata      = each.value.metadata
-
-  depends_on = [scaleway_object_bucket.this]
 }

@@ -13,12 +13,13 @@
 module "storage" {
   source = "../../"
 
-  # Required: Scaleway organization and project
-  organization_id = var.organization_id
-  project_name    = var.project_name
-  region          = "fr-par"
+  # null keeps the provider's default project; region and zone are pinned
+  project_id = var.project_id
+  region     = "fr-par"
+  zone       = "fr-par-1"
 
-  # Global tags applied to all resources
+  # Global tags applied to buckets, objects, volumes and snapshots
+  # (volumes and snapshots receive them as "key:value" strings)
   tags = {
     environment = var.environment
     managed-by  = "terraform"
@@ -101,10 +102,38 @@ module "storage" {
           expiration = {
             days = 365
           }
+        },
+        {
+          # Tag filter: only objects tagged tier=temp
+          id      = "expire-temp"
+          enabled = true
+          tags    = { tier = "temp" }
+
+          expiration = {
+            days = 7
+          }
         }
       ]
 
       tags = { type = "logs", retention = "1year" }
+    }
+
+    # ---------------------------------------------------------------------------
+    # Audit Bucket with Object Lock
+    # WORM: versioning is forced on; new objects are retained 1 day (GOVERNANCE).
+    # Objects stay undeletable until the retention ends, so destroy needs a wait.
+    # ---------------------------------------------------------------------------
+    audit = {
+      name = "${var.prefix}-audit-${var.environment}"
+
+      object_lock = {
+        default_retention = {
+          mode = "GOVERNANCE"
+          days = 1
+        }
+      }
+
+      tags = { type = "audit" }
     }
 
     # ---------------------------------------------------------------------------
@@ -185,7 +214,8 @@ module "storage" {
   # Block Storage Volumes
   # ============================================================================
 
-  block_volumes = {
+  # The restored volume only exists when var.restore_snapshot_id is set.
+  block_volumes = merge({
     # ---------------------------------------------------------------------------
     # Database Volume - High Performance
     # 15,000 IOPS for database workloads
@@ -195,7 +225,6 @@ module "storage" {
       name       = "${var.prefix}-db-${var.environment}"
       size_in_gb = 100
       iops       = 15000 # High performance tier
-      zone       = "fr-par-1"
       tags       = ["database", var.environment]
     }
 
@@ -209,7 +238,6 @@ module "storage" {
       count      = 2 # Create 2 volumes: app-1, app-2
       size_in_gb = 50
       iops       = 5000 # Standard tier
-      zone       = "fr-par-1"
       tags       = ["application", var.environment]
     }
 
@@ -222,10 +250,23 @@ module "storage" {
       name       = "${var.prefix}-logs-vol-${var.environment}"
       size_in_gb = 20
       iops       = 5000
-      zone       = "fr-par-1"
+      zone       = "fr-par-2" # A per-volume zone wins over the module zone
       tags       = ["logs", var.environment]
     }
-  }
+    }, {
+    # ---------------------------------------------------------------------------
+    # Restored Volume - size comes from the snapshot
+    # Creates: restored-1 (size_in_gb is omitted with snapshot_id)
+    # ---------------------------------------------------------------------------
+    for k, v in {
+      restored = {
+        name        = "${var.prefix}-restored-${var.environment}"
+        iops        = 5000
+        snapshot_id = var.restore_snapshot_id
+        tags        = ["restored", var.environment]
+      }
+    } : k => v if var.restore_snapshot_id != null
+  })
 
   # ============================================================================
   # Block Storage Snapshots
@@ -286,14 +327,16 @@ module "storage" {
 # Variables
 # ==============================================================================
 
-variable "organization_id" {
-  description = "Scaleway Organization ID (UUID format)"
+variable "project_id" {
+  description = "Scaleway Project ID (UUID) where resources are created; null uses the provider default project"
   type        = string
+  default     = null
 }
 
-variable "project_name" {
-  description = "Scaleway Project name where resources will be created"
+variable "restore_snapshot_id" {
+  description = "Zoned ID of a Block Storage snapshot to restore into an extra volume (size taken from the snapshot); null creates no restored volume"
   type        = string
+  default     = null
 }
 
 variable "prefix" {

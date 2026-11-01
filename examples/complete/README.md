@@ -4,24 +4,28 @@ Exercises every feature of the module across both Object Storage and Block Stora
 
 ## What it creates
 
-### Object Storage (13 buckets)
+### Object Storage (14 buckets)
 
 | Key       | Count |  ACL          | Features                                                                       |
 | --------- | :---: | ------------- | ------------------------------------------------------------------------------ |
 | `data`    |  10   | private       | Versioning + multipart cleanup lifecycle rule (`data-1` … `data-10`)           |
 | `assets`  |   1   | public-read   | CORS for browser access                                                        |
-| `logs`    |   1   | private       | Versioning + lifecycle (30d → GLACIER, 365d → expire)                          |
+| `logs`    |   1   | private       | Versioning + lifecycle (30d → GLACIER, 365d → expire; `tier=temp` objects after 7d via a tag filter)                          |
+| `audit`   |   1   | private       | Object lock (WORM): GOVERNANCE default retention of 1 day, versioning forced on |
 | `website` |   1   | public-read   | Static website hosting + CORS, with `index.html`/`404.html`/`robots.txt` upload |
 
 `count > 1` produces expanded keys `data-1` … `data-N` and suffixes the bucket name (`<prefix>-data-<env>-1` … `-10`). Snapshot exports target `data-1`.
 
-### Block Storage (4 volumes, 3 snapshots)
+### Block Storage (4 volumes, 3 snapshots; a fifth volume with `restore_snapshot_id`)
 
 | Key        | Count | IOPS   | Size   | Notes                                                  |
 | ---------- | :---: | -----: | -----: | ------------------------------------------------------ |
 | `database` |   1   | 15 000 | 100 GB | High-performance tier (DB workload)                    |
 | `app`      |   2   |  5 000 |  50 GB | `count=2` → `app-1`, `app-2`                           |
-| `logs`     |   1   |  5 000 |  20 GB | Standard performance                                   |
+| `logs`     |   1   |  5 000 |  20 GB | Standard performance, `zone = "fr-par-2"` overrides the module zone |
+| `restored` |   1   |  5 000 | snapshot | Only with `restore_snapshot_id`; `size_in_gb` omitted, taken from the snapshot |
+
+The module sets `zone = "fr-par-1"`, so the other volumes need no `zone`. The global `tags` also reach the objects, volumes (as `key:value`) and snapshots.
 
 | Snapshot key      | Count | Source         | Export                                          |
 | ----------------- | :---: | -------------- | ----------------------------------------------- |
@@ -34,8 +38,8 @@ Exercises every feature of the module across both Object Storage and Block Stora
 export SCW_ACCESS_KEY=...
 export SCW_SECRET_KEY=...
 
-export TF_VAR_organization_id=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-export TF_VAR_project_name=my-project
+export TF_VAR_project_id=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx   # optional: omit for the provider default project
+# export TF_VAR_restore_snapshot_id=fr-par-1/<snapshot-uuid>    # optional: adds the restored volume
 export TF_VAR_environment=dev      # dev | staging | production
 export TF_VAR_prefix=acme          # used in all bucket/volume names
 
@@ -50,19 +54,18 @@ When `environment != "production"`, `force_destroy = true` so `terraform destroy
 
 | Name              | Description                                                  | Default     |
 | ----------------- | ------------------------------------------------------------ | ----------- |
-| `organization_id` | Scaleway Organization ID (UUID)                              | required    |
-| `project_name`    | Scaleway project name                                        | required    |
+| `project_id`      | Scaleway project ID (UUID); `null` uses the provider default | `null`      |
+| `restore_snapshot_id` | Snapshot to restore into an extra volume (size from the snapshot) | `null` |
 | `prefix`          | Prefix for resource names (must be globally unique)          | `example`   |
 | `environment`     | Environment label, also gates `force_destroy` | `dev`     |
 
 ## Notable outputs
 
-- `bucket_endpoints` — S3 endpoint per bucket
-- `website_url` — Static website URL
+- `buckets` — All buckets with the endpoints the provider reports
+- `website_endpoint` — Static website endpoint
 - `block_volumes` — Map of all volumes with expanded keys
 - `database_volume_srn`, `database_backup_srn` — Scaleway Resource Names of the database volume and its snapshot
-- `block_snapshot_exports` — QCOW2 URLs for offsite backups
-- `aws_cli_commands` — Ready-to-paste `aws configure` commands for Scaleway
+- `block_snapshots` — All snapshots, with the effective export `bucket` and `key` of each QCOW2 file
 
 ## Cleanup
 
@@ -71,3 +74,5 @@ terraform destroy
 ```
 
 If `environment = production` the buckets won't auto-empty — clean them out first or temporarily flip `environment` to `dev`.
+
+The `audit` bucket holds objects under a GOVERNANCE retention: objects written there cannot be deleted until the retention ends (1 day), so `destroy` can fail until then.

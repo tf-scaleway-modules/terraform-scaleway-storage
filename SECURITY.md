@@ -12,7 +12,17 @@ Security guidance for operators of this module. Read this before deploying to a 
 
 - State files contain your full resource graph (and any `sensitive = true` values in cleartext). Always use a remote backend with encryption at rest and access control.
 - Do not commit `.tfstate` / `.tfstate.backup`. They are already in `.gitignore`.
-- Restrict the IAM identity used by CI to only the Scaleway APIs this module calls (Object Storage, Block Storage, Account project read).
+- Restrict the IAM identity used by CI to only the Scaleway APIs this module calls (Object Storage, Block Storage). The module no longer reads the project by name, so no Account project read is needed.
+
+### What lands in state
+
+| Data | In state | Note |
+|------|----------|------|
+| Secrets | none | The module has no secret-bearing input, and the provider has no write-only argument for these products |
+| Bucket policy | the JSON document | A policy is configuration, not a secret |
+| Object `content` | the inline content | Use `source` for anything confidential; do not put secrets in `content` |
+| Tags, names, IDs, endpoints | yes | Global `tags` also reach objects, volumes and snapshots |
+| Project ID | yes | An identifier, not a credential |
 
 ## Least privilege
 
@@ -28,20 +38,21 @@ Security guidance for operators of this module. Read this before deploying to a 
 
 ## Object Lock (WORM)
 
-- `object_lock_enabled` cannot be turned off after bucket creation. Versioning is forced on whenever it is set.
+- `object_lock` cannot be turned off after bucket creation. Versioning is forced on whenever it is set. Its optional `default_retention` is applied to the bucket as a separate lock configuration.
 - `mode = COMPLIANCE` is **irreversible**: no one (including the root account) can delete or overwrite a locked object until retention expires. Use it only when a regulator requires it, and test in `GOVERNANCE` mode first.
 - Long retention (`days = 36500` / `years = 100`) under `COMPLIANCE` makes data permanently immutable for the practical lifetime of the bucket.
 
 ## Block storage
 
-- `lifecycle.prevent_destroy` is `false` on every resource and Terraform requires it to be a literal, so the module cannot protect a volume from destruction. The `prevent_destroy` input of each volume is **not enforced**; setting it to `true` only raises a plan warning (`block_volume_prevent_destroy_not_enforced`).
+- The module cannot protect a volume from destruction (Terraform requires `lifecycle.prevent_destroy` to be a literal), so it has no `prevent_destroy` input.
 - Protect volumes you cannot afford to lose with plan review, a CI key without delete rights where your workflow allows it, and snapshots.
+- A `region` or `zone` left unset follows the provider default; a different default **replaces** buckets and volumes. Pin both on existing deployments.
 - Snapshots exported as QCOW2 to Object Storage inherit the destination bucket's ACL and policy — make sure the destination bucket is private.
 
 ## Production checklist
 
 - [ ] `force_destroy = false` for every bucket
-- [ ] Critical volumes have recent snapshots and `plan` is reviewed for destroys (`prevent_destroy` is not enforced)
+- [ ] Critical volumes have recent snapshots and `plan` is reviewed for destroys
 - [ ] Versioning enabled for any bucket whose data must survive accidental deletion
 - [ ] Bucket policies include the Terraform-running principal with `s3:*`
 - [ ] `Principal: "*"` only on objects you intend to publish

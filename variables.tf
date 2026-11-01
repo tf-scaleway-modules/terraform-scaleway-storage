@@ -6,58 +6,36 @@
 # ╚══════════════════════════════════════════════════════════════════════════════╝
 
 # ==============================================================================
-# Organization & Project
+# Project, Region & Zone
 # ------------------------------------------------------------------------------
-# Required identifiers for Scaleway resource organization.
-# These determine where resources are created and billed.
+# Where resources are created and billed. Every input defaults to null, which
+# keeps the provider's own default project, region and zone.
 # ==============================================================================
 
-variable "organization_id" {
+variable "project_id" {
   description = <<-EOT
-    Scaleway Organization ID.
+    Scaleway Project ID where all resources are created.
 
-    The organization is the top-level entity in Scaleway's hierarchy.
-    Find this in the Scaleway Console under Organization Settings.
+    Projects provide logical isolation within an organization.
+    When null, the provider's default project is used.
 
     Format: UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
   EOT
   type        = string
+  default     = null
 
   validation {
-    condition     = can(regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", var.organization_id))
-    error_message = "Organization ID must be a valid UUID format."
+    condition     = var.project_id == null || can(regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", var.project_id))
+    error_message = "Project ID must be a valid UUID."
   }
 }
-
-variable "project_name" {
-  description = <<-EOT
-    Scaleway Project name where all resources will be created.
-
-    Projects provide logical isolation within an organization.
-    All buckets, objects, and policies will be created in this project.
-
-    Naming rules:
-    - Must start with a lowercase letter
-    - Can contain lowercase letters, numbers, and hyphens
-    - Must be 2-63 characters long
-  EOT
-  type        = string
-
-  validation {
-    condition     = can(regex("^[a-z][a-z0-9-]{0,61}[a-z0-9]$", var.project_name))
-    error_message = "Project name must be lowercase alphanumeric with hyphens, start with a letter, and be 2-63 characters."
-  }
-}
-
-# ==============================================================================
-# Global Configuration
-# ------------------------------------------------------------------------------
-# Settings that apply to all resources created by this module.
-# ==============================================================================
 
 variable "region" {
   description = <<-EOT
-    Scaleway region for object storage.
+    Scaleway region for Object Storage.
+
+    When null, the provider's default region is used. A default region that
+    differs from the one the buckets were created in forces their replacement.
 
     Available regions:
     - fr-par: Paris, France (Europe)
@@ -68,24 +46,44 @@ variable "region" {
     Data residency requirements may also influence this choice.
   EOT
   type        = string
-  default     = "fr-par"
+  default     = null
 
   validation {
-    condition     = contains(["fr-par", "nl-ams", "pl-waw"], var.region)
+    condition     = var.region == null || contains(["fr-par", "nl-ams", "pl-waw"], var.region)
     error_message = "Region must be one of: fr-par, nl-ams, pl-waw."
+  }
+}
+
+variable "zone" {
+  description = <<-EOT
+    Default Availability Zone of Block Storage volumes and imported snapshots
+    that set no zone of their own (for example fr-par-1).
+
+    When null, the provider's default zone is used. A default zone that differs
+    from the one the volumes were created in forces their replacement.
+  EOT
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.zone == null || can(regex("^[a-z]{2}-[a-z]{3}-[0-9]$", var.zone))
+    error_message = "Zone must be in format: xx-xxx-N (e.g., fr-par-1, nl-ams-1)."
   }
 }
 
 variable "tags" {
   description = <<-EOT
-    Global tags merged into the tags of every bucket (bucket tags win on a shared key).
-    Block volumes and snapshots take their own list of strings and do not use them.
+    Global tags applied to every taggable resource.
 
-    Tags are key-value pairs for organizing and categorizing resources.
+    Buckets and objects receive them merged with their own tags (the per-item
+    value wins on a shared key). Block volumes and snapshots take lists of
+    strings, so the global tags are added to theirs as "key:value" strings
+    without duplicates.
+
     Common uses:
-    - Environment identification (environment:production)
-    - Cost allocation (team:platform, project:website)
-    - Automation (managed-by:terraform)
+    - Environment identification (environment = "production")
+    - Cost allocation (team = "platform", project = "website")
+    - Automation (managed-by = "terraform")
 
     Format: Map of strings (e.g., {env = "prod", team = "devops"})
   EOT
@@ -113,9 +111,10 @@ variable "buckets" {
     count               : Number of bucket instances to create (default: 1)
     acl                 : Access control - private, public-read, authenticated-read (public-read-write blocked for security)
     force_destroy       : Allow deletion of non-empty bucket (default: false)
-    object_lock_enabled : Enable WORM compliance - cannot be disabled once enabled
+    object_lock         : Enable WORM compliance (forces versioning) - cannot be disabled once enabled;
+                          set default_retention to apply a retention to new objects
     versioning          : Keep multiple versions of objects
-    tags                : Additional tags for this bucket
+    tags                : Additional tags for this bucket (merged over the global tags)
 
     SERVER-SIDE ENCRYPTION (default encryption of new objects):
     ───────────────────────────────────────────────────────────
@@ -131,11 +130,23 @@ variable "buckets" {
     expose_headers  : Headers exposed to browser
     max_age_seconds : Preflight cache duration (default: 3600)
 
+    OBJECT LOCK (WORM):
+    ───────────────────
+    object_lock = {
+      default_retention = {         # optional; omit for lock without a default retention
+        mode  = "GOVERNANCE"        # GOVERNANCE: bypassable with s3:BypassGovernanceRetention
+                                    # COMPLIANCE: cannot be overridden by anyone (irreversible!)
+        days  = 30                  # exactly one of days (1-36500) or years (1-100)
+      }
+    }
+    WARNING: COMPLIANCE with a long retention can make data permanently immutable.
+
     LIFECYCLE RULES (automatic object management):
     ──────────────────────────────────────────────
     id         : Unique rule identifier
     enabled    : Whether rule is active (default: true)
     prefix     : Apply to objects with this prefix (empty = all)
+    tags       : Apply to objects carrying all these tags (empty = no tag filter)
     expiration : Auto-delete after N days and/or remove expired delete markers
     transition : Move to storage class (STANDARD, GLACIER, ONEZONE_IA) after N days
     noncurrent_version_expiration : Delete noncurrent versions (versioned buckets)
@@ -151,13 +162,21 @@ variable "buckets" {
 
   type = map(object({
     # Core bucket settings
-    name                = string
-    count               = optional(number, 1) # Number of buckets to create (appends -1, -2, etc. to name)
-    acl                 = optional(string, "private")
-    force_destroy       = optional(bool, false)
-    object_lock_enabled = optional(bool, false)
-    versioning          = optional(bool, false)
-    tags                = optional(map(string), {})
+    name          = string
+    count         = optional(number, 1) # Number of buckets to create (appends -1, -2, etc. to name)
+    acl           = optional(string, "private")
+    force_destroy = optional(bool, false)
+    versioning    = optional(bool, false)
+    tags          = optional(map(string), {})
+
+    # WORM: enables object lock (and versioning); default_retention is optional
+    object_lock = optional(object({
+      default_retention = optional(object({
+        mode  = string
+        days  = optional(number)
+        years = optional(number)
+      }))
+    }))
 
     # Default server-side encryption (SSE-S3 or SSE-KMS)
     server_side_encryption = optional(object({
@@ -180,6 +199,7 @@ variable "buckets" {
       id      = string
       enabled = optional(bool, true)
       prefix  = optional(string, "")
+      tags    = optional(map(string), {})
 
       # Object size filters, in bytes
       object_size_greater_than = optional(number)
@@ -293,6 +313,35 @@ variable "buckets" {
     error_message = "Bucket count must be at least 1."
   }
 
+  # Validate lock mode
+  validation {
+    condition = alltrue([
+      for k, v in var.buckets :
+      v.object_lock == null || v.object_lock.default_retention == null || contains(["GOVERNANCE", "COMPLIANCE"], v.object_lock.default_retention.mode)
+    ])
+    error_message = "Lock mode must be either GOVERNANCE or COMPLIANCE."
+  }
+
+  # Validate exactly one of days/years is specified
+  validation {
+    condition = alltrue([
+      for k, v in var.buckets :
+      v.object_lock == null || v.object_lock.default_retention == null || (v.object_lock.default_retention.days != null) != (v.object_lock.default_retention.years != null)
+    ])
+    error_message = "Exactly one of 'days' or 'years' must be specified for retention period."
+  }
+
+  # Validate retention period ranges
+  validation {
+    condition = alltrue([
+      for k, v in var.buckets :
+      v.object_lock == null || v.object_lock.default_retention == null || (
+        (v.object_lock.default_retention.days == null || (v.object_lock.default_retention.days >= 1 && v.object_lock.default_retention.days <= 36500)) &&
+        (v.object_lock.default_retention.years == null || (v.object_lock.default_retention.years >= 1 && v.object_lock.default_retention.years <= 100))
+      )
+    ])
+    error_message = "Retention days must be 1-36500, years must be 1-100."
+  }
 }
 
 # ==============================================================================
@@ -372,84 +421,6 @@ variable "bucket_policies" {
 }
 
 # ==============================================================================
-# Object Lock Configuration
-# ------------------------------------------------------------------------------
-# WORM (Write Once Read Many) compliance settings.
-# Used for regulatory compliance, legal holds, and data protection.
-# ==============================================================================
-
-variable "bucket_lock_configurations" {
-  description = <<-EOT
-    Map of object lock configurations for WORM compliance.
-
-    Object lock prevents object deletion or modification for a retention period.
-    IMPORTANT: The bucket must have object_lock_enabled = true.
-
-    LOCK MODES:
-    ───────────
-    GOVERNANCE  : Can be overridden by users with s3:BypassGovernanceRetention permission
-    COMPLIANCE  : Cannot be overridden by anyone, including root account (irreversible!)
-
-    RETENTION PERIOD (specify exactly one):
-    ───────────────────────────────────────
-    days  : Number of days to retain (1-36500)
-    years : Number of years to retain (1-100)
-
-    WARNING: COMPLIANCE mode with long retention can make data permanently
-    immutable. Test thoroughly in non-production environments first.
-  EOT
-
-  type = map(object({
-    bucket_key = string
-    rule = object({
-      default_retention = object({
-        mode  = string
-        days  = optional(number)
-        years = optional(number)
-      })
-    })
-  }))
-
-  default = {}
-
-  # Validate lock mode
-  validation {
-    condition = alltrue([
-      for k, v in var.bucket_lock_configurations :
-      contains(["GOVERNANCE", "COMPLIANCE"], v.rule.default_retention.mode)
-    ])
-    error_message = "Lock mode must be either GOVERNANCE or COMPLIANCE."
-  }
-
-  # Validate exactly one of days/years is specified
-  validation {
-    condition = alltrue([
-      for k, v in var.bucket_lock_configurations :
-      (v.rule.default_retention.days != null) != (v.rule.default_retention.years != null)
-    ])
-    error_message = "Exactly one of 'days' or 'years' must be specified for retention period."
-  }
-
-  # Validate retention period ranges
-  validation {
-    condition = alltrue([
-      for k, v in var.bucket_lock_configurations :
-      (v.rule.default_retention.days == null || (v.rule.default_retention.days >= 1 && v.rule.default_retention.days <= 36500)) &&
-      (v.rule.default_retention.years == null || (v.rule.default_retention.years >= 1 && v.rule.default_retention.years <= 100))
-    ])
-    error_message = "Retention days must be 1-36500, years must be 1-100."
-  }
-
-  # Validate bucket_key is an expanded key of var.buckets
-  validation {
-    condition = alltrue([
-      for k, v in var.bucket_lock_configurations : contains(flatten([for bk, b in var.buckets : [for i in range(1, b.count + 1) : "${bk}-${i}"]]), v.bucket_key)
-    ])
-    error_message = "bucket_key must be an expanded key of var.buckets (for example data-1)."
-  }
-}
-
-# ==============================================================================
 # Objects Configuration
 # ------------------------------------------------------------------------------
 # Upload objects (files) to buckets during infrastructure provisioning.
@@ -471,7 +442,7 @@ variable "objects" {
     content      : Inline string content (mutually exclusive with source)
     content_type : MIME type (auto-detected if not specified)
     visibility   : private (default) or public-read
-    tags         : Object-level tags
+    tags         : Object-level tags (merged over the global tags)
     hash         : (Optional) Triggers a re-upload when it changes; use filemd5(path)
                    with source so a modified file is uploaded again
     storage_class: (Optional) STANDARD, GLACIER or ONEZONE_IA (provider default if unset)
@@ -575,13 +546,12 @@ variable "block_volumes" {
     ─────────────────────
     name            : (Optional) Volume name, auto-generated if not provided
     count           : (Optional) Number of volume instances to create (default: 1)
-    size_in_gb      : (Required) Volume size in GB (minimum 5 GB)
+    size_in_gb      : (Required unless snapshot_id is set) Volume size in GB (minimum 5 GB);
+                      a volume restored from a snapshot takes the snapshot size when unset
     iops            : (Required) IOPS performance tier - 5000 or 15000
-    zone            : (Optional) Availability Zone (defaults to fr-par-1 whatever var.region is)
+    zone            : (Optional) Availability Zone (defaults to var.zone, then the provider default zone)
     snapshot_id     : (Optional) Create volume from existing snapshot
-    prevent_destroy : (Optional) NOT ENFORCED: lifecycle.prevent_destroy must be a literal, so
-                      the module cannot honour it; setting it to true only raises a plan warning
-    tags            : (Optional) List of tags for the volume (not merged with var.tags)
+    tags            : (Optional) List of tags for the volume (global tags are added as "key:value")
 
     IOPS TIERS:
     ───────────
@@ -600,18 +570,17 @@ variable "block_volumes" {
     - IOPS cannot be changed after volume creation
     - Volume must be in same zone as Instance to attach
     - Minimum size is 5 GB
-    - Protect production volumes with plan review and least-privilege credentials, not prevent_destroy
+    - Protect production volumes with plan review and least-privilege credentials
   EOT
 
   type = map(object({
-    name            = optional(string)
-    count           = optional(number, 1)
-    size_in_gb      = number
-    iops            = number
-    zone            = optional(string, "fr-par-1")
-    snapshot_id     = optional(string)
-    prevent_destroy = optional(bool, false)
-    tags            = optional(list(string), [])
+    name        = optional(string)
+    count       = optional(number, 1)
+    size_in_gb  = optional(number)
+    iops        = number
+    zone        = optional(string)
+    snapshot_id = optional(string)
+    tags        = optional(list(string), [])
   }))
 
   default = {}
@@ -624,10 +593,18 @@ variable "block_volumes" {
     error_message = "Block volume IOPS must be either 5000 or 15000."
   }
 
+  # Validate the size is given unless a snapshot provides it
+  validation {
+    condition = alltrue([
+      for k, v in var.block_volumes : v.size_in_gb != null || v.snapshot_id != null
+    ])
+    error_message = "Block volume size_in_gb is required unless snapshot_id is set."
+  }
+
   # Validate minimum size
   validation {
     condition = alltrue([
-      for k, v in var.block_volumes : v.size_in_gb >= 5
+      for k, v in var.block_volumes : v.size_in_gb == null || v.size_in_gb >= 5
     ])
     error_message = "Block volume size must be at least 5 GB."
   }
@@ -635,7 +612,7 @@ variable "block_volumes" {
   # Validate zone format
   validation {
     condition = alltrue([
-      for k, v in var.block_volumes : can(regex("^[a-z]{2}-[a-z]{3}-[0-9]$", v.zone))
+      for k, v in var.block_volumes : v.zone == null || can(regex("^[a-z]{2}-[a-z]{3}-[0-9]$", v.zone))
     ])
     error_message = "Zone must be in format: xx-xxx-N (e.g., fr-par-1, nl-ams-1)."
   }
@@ -667,8 +644,9 @@ variable "block_snapshots" {
     name       : (Optional) Snapshot name, auto-generated if not provided
     count      : (Optional) Number of snapshot instances to create (default: 1)
     volume_key : (Required if no import) Reference to expanded volume key (e.g., "database-1")
-    zone       : (Optional) Availability Zone (defaults to volume's zone)
-    tags       : (Optional) Tags for the snapshot
+    zone       : (Optional) Availability Zone (from-volume: the volume's zone; imported: var.zone,
+                 then the provider default zone)
+    tags       : (Optional) Tags for the snapshot (global tags are added as "key:value")
     timeouts   : (Optional) create/read/update/delete durations such as "30m" or "1h30m"
                  (provider default 5m each); raise create for large exports and imports
 
@@ -740,6 +718,15 @@ variable "block_snapshots" {
       v.volume_key != null || v.import != null
     ])
     error_message = "Either volume_key or import block must be specified for each snapshot."
+  }
+
+  # Validate volume_key is an expanded key of var.block_volumes
+  validation {
+    condition = alltrue([
+      for k, v in var.block_snapshots :
+      v.volume_key == null || contains(flatten([for vk, b in var.block_volumes : [for i in range(1, b.count + 1) : "${vk}-${i}"]]), v.volume_key)
+    ])
+    error_message = "volume_key must be an expanded key of var.block_volumes (for example db-1)."
   }
 
   # Validate volume_key format when provided
