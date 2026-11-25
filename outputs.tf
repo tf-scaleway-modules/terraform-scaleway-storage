@@ -13,21 +13,7 @@
 # ==============================================================================
 
 output "buckets" {
-  description = <<-EOT
-    Map of all created buckets with their complete details, keyed by expanded
-    bucket key (e.g., "data-1").
-
-    Each bucket includes:
-    - id: Scaleway resource ID
-    - name: Bucket name
-    - region: Region of the bucket
-    - endpoint: S3 bucket endpoint URL (reported by the provider)
-    - api_endpoint: S3 API endpoint (reported by the provider)
-    - versioning_enabled: Whether versioning is active
-    - object_lock_enabled: Whether WORM is enabled
-    - website_endpoint: Static website endpoint (null without a website)
-    - tags: Applied tags
-  EOT
+  description = "Map of all created buckets keyed by expanded bucket key (for example `data-1`). Each entry holds `id`, `name`, `region`, `endpoint`, `api_endpoint`, `versioning_enabled`, `object_lock_enabled`, `website_endpoint` (`null` without a website) and `tags`."
   value = {
     for k, v in scaleway_object_bucket.this : k => {
       id                  = v.id
@@ -50,17 +36,7 @@ output "buckets" {
 # ==============================================================================
 
 output "objects" {
-  description = <<-EOT
-    Map of all uploaded objects with their details, keyed like the objects input.
-
-    Each object includes:
-    - id: Scaleway resource ID
-    - bucket: Bucket name
-    - key: Object key
-    - url: Object URL (the bucket endpoint reported by the provider, then the key)
-    - content_type: MIME type
-    - visibility: private or public-read
-  EOT
+  description = "Map of all uploaded objects keyed like the `objects` input. Each entry holds `id`, `bucket`, `key`, `url` (bucket endpoint plus key), `content_type` and `visibility`."
   value = {
     for k, v in scaleway_object.this : k => {
       id           = v.id
@@ -81,21 +57,7 @@ output "objects" {
 # ==============================================================================
 
 output "block_volumes" {
-  description = <<-EOT
-    Map of all created Block Storage volumes with their details.
-
-    Keys use expanded format (e.g., "database-1", "database-2").
-
-    Each volume includes:
-    - id: Volume ID (zoned format: zone/uuid)
-    - srn: Scaleway Resource Name
-    - name: Volume name
-    - size_in_gb: Volume size
-    - iops: IOPS performance tier
-    - zone: Availability Zone
-    - volume_key: Original volume key (before expansion)
-    - index: Instance index (1, 2, 3, ...)
-  EOT
+  description = "Map of all created Block Storage volumes keyed by expanded key (for example `database-1`). Each entry holds `id` (zoned `zone/uuid`), `srn`, `name`, `size_in_gb`, `iops`, `zone`, `volume_key` (key before expansion) and `index`."
   value = {
     for k, v in scaleway_block_volume.this : k => {
       id         = v.id
@@ -111,23 +73,7 @@ output "block_volumes" {
 }
 
 output "block_snapshots" {
-  description = <<-EOT
-    Map of all created Block Storage snapshots with their details.
-
-    Keys use expanded format (e.g., "backup-1", "backup-2").
-    Includes both volume-based and imported snapshots.
-
-    Each snapshot includes:
-    - id: Snapshot ID
-    - srn: Scaleway Resource Name
-    - name: Snapshot name
-    - volume_id: Source volume ID (null for imported snapshots)
-    - zone: Availability Zone
-    - snapshot_key: Original snapshot key (before expansion)
-    - index: Instance index (1, 2, 3, ...)
-    - source: "volume" or "import"
-    - export: Export details if configured (bucket, key)
-  EOT
+  description = "Map of all created Block Storage snapshots, volume-based and imported, keyed by expanded key (for example `backup-1`). Each entry holds `id`, `srn`, `name`, `volume_id` (`null` for imported snapshots), `zone`, `snapshot_key` (key before expansion), `index`, `source` (`volume` or `import`) and `export` (bucket and key, if configured)."
   value = merge(
     # Snapshots from volumes
     {
