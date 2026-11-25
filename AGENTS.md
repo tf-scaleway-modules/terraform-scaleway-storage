@@ -1,7 +1,7 @@
 # AGENTS.md — terraform-modules-scaleway-storage
 
 ## Project
-OpenTofu/Terraform module for Scaleway storage: Object Storage buckets (encryption,
+OpenTofu (>= 1.11.0) and Terraform (>= 1.11.0) module for Scaleway storage: Object Storage buckets (encryption,
 lifecycle, CORS, ACL, website, object lock, policies, objects) and Block Storage
 volumes and snapshots. Published on GitLab at
 `gitlab.com/leminnov/terraform/modules/scaleway-storage`; consumers pin a git tag. Planning uses OpenSpec (`openspec/`). Engineering
@@ -66,7 +66,7 @@ Never deviate silently: add a `# DEVIATION(<spec-id>): <reason>` comment and lis
 in your summary.
 
 ## Commands
-- Format / validate: `tofu fmt -recursive`, `tofu init -backend=false && tofu validate`, `tflint --recursive`
+- Format / validate: `tofu fmt -recursive`, `tofu init -backend=false && tofu validate`, `terraform init -backend=false && terraform validate`, `tflint --recursive`
 - Tests: `tofu test` (unit, mock providers, no credentials; see `TESTING.md`)
 - Everything incl. README regeneration: `pre-commit run -a`
 - Changelog: `mise run changelog` (git-cliff, at release)

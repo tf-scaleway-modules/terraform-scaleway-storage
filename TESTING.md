@@ -20,7 +20,7 @@ Tools are pinned in `mise.toml`:
 mise install
 ```
 
-Provides: `opentofu 1.11`, `terraform-docs 0.21`, `tflint 0.56`, `pre-commit 4.3`.
+Provides: `opentofu 1.13.10`, `terraform 1.17.2`, `terraform-docs 0.22.0`, `tflint 0.62.0`, `pre-commit 4.6`.
 
 ## Running the tests
 
