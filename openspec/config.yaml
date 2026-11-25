@@ -17,7 +17,7 @@ references:
     ref: v4.1.0
   - id: terraform
     remote: https://gitlab.com/leminnov/agentic-coding/openspec/terraform.git
-    ref: v1.2.6
+    ref: v2.1.0
 
 context: |
   Quality mandate: every artifact applies the non-negotiables of AGENTS.md
@@ -32,7 +32,7 @@ context: |
   (leminnov/terraform/modules/scaleway-storage); consumers pin a git tag
   (?ref=vX.Y.Z). Apache-2.0.
 
-  Stack: HCL only. required_version >= 1.11.0 (OpenTofu 1.11+). Provider
+  Stack: HCL only. required_version >= 1.11.0 (OpenTofu and Terraform 1.11+). Provider
   pinned with ~> in versions.tf: scaleway/scaleway ~> 2.89. Every tool is
   pinned in mise.toml.
 
