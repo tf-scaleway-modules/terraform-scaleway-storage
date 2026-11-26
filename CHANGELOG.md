@@ -4,8 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [4.0.2] - 2026-11-26
 - Fix the README bucket policy example that broke the rendering of every later section
+## [4.0.1] - 2026-11-25
 - Validate the module with Terraform and pin both toolchains
 - Rewrite input and output descriptions as single-line prose so they render on the Terraform Registry
+## [4.0.0] - 2026-11-01
 - Fold object lock into buckets, add lifecycle tag filters and slim outputs; use project_id with optional region and zone
 
 BREAKING: v4.0.0.
@@ -25,6 +27,7 @@ BREAKING: v4.0.0.
 - New lifecycle_rules[*].tags, optional size_in_gb with snapshot_id.
 
 See "Upgrading from v3 to v4" in the README.
+## [3.0.0] - 2026-10-31
 - Raise provider floor to ~> 2.89 and add snapshot timeouts, object hash, storage class and metadata
 
 BREAKING: the scaleway provider floor is raised from ~> 2.86 to ~> 2.89
@@ -38,6 +41,7 @@ BREAKING: the scaleway provider floor is raised from ~> 2.86 to ~> 2.89
 - Lifecycle `STANDARD_IA` is now rejected by validation (the provider
   already refused it); allowed classes are STANDARD, GLACIER, ONEZONE_IA.
 - block_volumes and block_snapshots outputs gain an `srn` key.
+## [2.2.2] - 2026-10-28
 - Fix bucket_key and name-length validation, uppercase export suffix and prevent_destroy docs
 
 - Reject bucket_key values in bucket_policies, bucket_lock_configurations and objects that are not an expanded bucket key, instead of failing with an index error.
@@ -48,6 +52,7 @@ BREAKING: the scaleway provider floor is raised from ~> 2.86 to ~> 2.89
 No upgrade action needed.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+## [2.2.1] - 2026-10-28
 - Install mise 2026.10.17 in CI to avoid the GitHub API rate limit
 
 The pre-commit job installed an old mise that resolves every tool through api.github.com without a token, and failed with 403 rate-limit errors on the shared office runner whenever its cache was cold (new refs such as merge requests and tags). mise 2026.9.14 and later resolve releases through mise-versions.jdx.dev.
@@ -78,6 +83,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
   own copy on the runner disk.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+## [2.2.0] - 2026-10-14
 - feat: add bucket default encryption and noncurrent version lifecycle rules
 
 - buckets: add server_side_encryption (AES256 or aws:kms) using
@@ -88,6 +94,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 - Bump the scaleway provider constraint to ~> 2.86 (module and examples).
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+## [2.1.0] - 2026-04-27
 - Adds `count` parameter for object storage buckets
 
 Introduces the `count` attribute to object storage bucket definitions, allowing multiple buckets to be created from a single configuration block. Buckets with `count > 1` will have numerically suffixed names (e.g., `data-1`, `data-10`).
@@ -95,6 +102,7 @@ Introduces the `count` attribute to object storage bucket definitions, allowing 
 The complete example is updated to demonstrate this feature by creating 10 data buckets, and block storage snapshot exports are adjusted to target the first instance of a counted bucket (`data-1`).
 
 A new `examples.tftest.hcl` is added to provide comprehensive validation of the complete example's resource topology, including assertions for bucket counts, naming conventions, and proper referencing of counted resources. Additional tests for `count` behavior are also added to `main.tftest.hcl`.
+## [2.0.0] - 2026-04-27
 - Updates Scaleway provider version in README
 
 Updates the Scaleway provider version constraint in the documentation to ~> 2.73 to match the project's requirements.
@@ -118,6 +126,7 @@ Key changes:
 - Refactors Scaleway storage resources into domain-specific files (object-storage.tf, block-storage.tf).
 - Introduces native OpenTofu/Terraform tests and complete usage examples.
 - Adds SECURITY.md and TESTING.md documentation.
+## [1.0.0] - 2025-12-21
 - Adds Scaleway Block Storage support
 
 Adds support for Scaleway Block Storage, including volume and snapshot creation, snapshot export/import to object storage, and lifecycle management.
