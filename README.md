@@ -411,32 +411,36 @@ module "storage" {
 }
 ```
 
-# Example bucket policy (use with caution - see Security section):
-# bucket_policies = {
-#   assets_cdn = {
-#     bucket_key = "assets-1"  # Must use expanded key
-#     policy = jsonencode({
-#       Version = "2023-04-17"  # Scaleway version, NOT AWS "2012-10-17"
-#       Id      = "CDNAccess"
-#       Statement = [
-#         {
-#           Sid       = "TerraformAccess"
-#           Effect    = "Allow"
-#           Principal = { SCW = "user_id:<YOUR_USER_ID>" }  # Your Scaleway user
-#           Action    = "s3:*"
-#           Resource  = ["${var.prefix}-assets-${var.environment}", "${var.prefix}-assets-${var.environment}/*"]
-#         },
-#         {
-#           Sid       = "PublicRead"
-#           Effect    = "Allow"
-#           Principal = "*"
-#           Action    = "s3:GetObject"
-#           Resource  = "${var.prefix}-assets-${var.environment}/*"
-#         }
-#       ]
-#     })
-#   }
-# }
+### Bucket Policy for Public Read
+
+Use with caution: read [Bucket Policies](#bucket-policies) and [Security Best Practices](#security-best-practices) first. With Version `2023-04-17` only the listed actions are allowed, so the first statement keeps full access for the identity that runs Terraform. Add to the module call:
+
+```hcl
+bucket_policies = {
+  assets_cdn = {
+    bucket_key = "assets-1"  # Must use expanded key
+    policy = jsonencode({
+      Version = "2023-04-17"  # Scaleway version, NOT AWS "2012-10-17"
+      Id      = "CDNAccess"
+      Statement = [
+        {
+          Sid       = "TerraformAccess"
+          Effect    = "Allow"
+          Principal = { SCW = "user_id:<YOUR_USER_ID>" }  # Your Scaleway user
+          Action    = "s3:*"
+          Resource  = ["${var.prefix}-assets-${var.environment}", "${var.prefix}-assets-${var.environment}/*"]
+        },
+        {
+          Sid       = "PublicRead"
+          Effect    = "Allow"
+          Principal = "*"
+          Action    = "s3:GetObject"
+          Resource  = "${var.prefix}-assets-${var.environment}/*"
+        }
+      ]
+    })
+  }
+}
 ```
 
 ## Architecture

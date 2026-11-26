@@ -2,7 +2,8 @@
 
 All notable changes to this project will be documented in this file.
 
-## [4.0.1] - 2026-11-25
+## [4.0.2] - 2026-11-26
+- Fix the README bucket policy example that broke the rendering of every later section
 - Validate the module with Terraform and pin both toolchains
 - Rewrite input and output descriptions as single-line prose so they render on the Terraform Registry
 - Fold object lock into buckets, add lifecycle tag filters and slim outputs; use project_id with optional region and zone
