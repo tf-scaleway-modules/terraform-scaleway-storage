@@ -2,6 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
+
 ## [4.0.2] - 2026-11-26
 - Fix the README bucket policy example that broke the rendering of every later section
 ## [4.0.1] - 2026-11-25
@@ -168,4 +169,3 @@ Provides examples for minimal setup, compliance buckets, and static websites.
 Follows infrastructure-as-code best practices with extensive validation and sensible defaults.
 - first commit
 - Initial commit
-
